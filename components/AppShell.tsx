@@ -27,25 +27,28 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="shell">
       <nav className="sidenav">
-        <div className="logo">AI</div>
+        <div className="logo"><img src="/logo.png" alt="MetaFrame" /></div>
         {NAV.map((n) => (
           <Link key={n.href} href={n.href} className={`navbtn ${path?.startsWith(n.href) ? "active" : ""}`} title={n.label}>
-            <Icon name={n.icon} size={20} />
+            <Icon name={n.icon} size={18} />
             <span>{n.label}</span>
           </Link>
         ))}
         <div className="grow" />
         <button className={`navbtn ${chatOpen ? "active" : ""}`} onClick={() => setChatOpen(!chatOpen)} title="Промпт-ассистент">
-          <Icon name="chat" size={20} />
+          <Icon name="chat" size={18} />
           <span>Чат</span>
         </button>
         <button className="navbtn" onClick={logout} title="Выйти">
-          <Icon name="logout" size={20} />
+          <Icon name="logout" size={18} />
           <span>Выход</span>
         </button>
       </nav>
       <main className="main">
         {config?.mock && <div className="banner">Тестовый режим: генерации не настоящие (MOCK_PROVIDERS=1)</div>}
+        {config?.storageMissing && (
+          <div className="banner warn">Не подключено хранилище: добавьте STORAGE_URL и STORAGE_SECRET в Vercel → Settings → Environment Variables и сделайте Redeploy. Без него не работают загрузка референсов и история.</div>
+        )}
         {missing && missing.length > 0 && (
           <div className="banner warn">Не заданы ключи: {missing.join(", ")}. Добавьте их в Vercel → Settings → Environment Variables и сделайте Redeploy.</div>
         )}

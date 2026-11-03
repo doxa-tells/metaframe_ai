@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Studio",
+  title: "MetaFrame AI",
   description: "Генерация фото и видео: Nano Banana, Soul, Seedance, Kling",
 };
 

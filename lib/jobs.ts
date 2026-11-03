@@ -90,12 +90,15 @@ async function toProviderUrl(url: string, origin: string): Promise<string> {
   return toAbsolute(url, origin);
 }
 
-function mockSvg(prompt: string, seed: number): string {
+function mockSvg(prompt: string, seed: number, aspect = "3:4"): string {
   const hue = seed % 360;
+  const m = /^(\d+):(\d+)$/.exec(aspect);
+  const W = m ? Math.round(1024 * Math.sqrt(Number(m[1]) / Number(m[2]))) : 768;
+  const H = m ? Math.round(1024 * Math.sqrt(Number(m[2]) / Number(m[1]))) : 1024;
   const safe = prompt.replace(/[<>&"]/g, " ").slice(0, 60);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="768" height="1024" viewBox="0 0 768 1024">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
 <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue},70%,45%)"/><stop offset="1" stop-color="hsl(${(hue + 80) % 360},70%,20%)"/></linearGradient></defs>
-<rect width="768" height="1024" fill="url(#g)"/><text x="40" y="980" fill="white" font-family="sans-serif" font-size="28" opacity=".85">MOCK · ${safe}</text></svg>`;
+<rect width="${W}" height="${H}" fill="url(#g)"/><text x="40" y="${H - 44}" fill="white" font-family="sans-serif" font-size="28" opacity=".85">MOCK · ${safe}</text></svg>`;
 }
 
 export async function createJob(req: GenRequest, origin: string): Promise<JobRecord> {
@@ -116,7 +119,7 @@ export async function createJob(req: GenRequest, origin: string): Promise<JobRec
       const n = Number(req.params.count ?? req.params.batch_size ?? 1) || 1;
       const outputs: JobOutput[] = [];
       for (let i = 0; i < n; i++) {
-        const url = await putFile(`out/${id}/${i}.svg`, mockSvg(base.prompt, Date.now() + i * 47), "image/svg+xml");
+        const url = await putFile(`out/${id}/${i}.svg`, mockSvg(base.prompt, Date.now() + i * 47, String(req.params.aspect_ratio ?? "3:4")), "image/svg+xml");
         outputs.push({ url, type: "image" });
       }
       const rec = { ...base, status: "completed" as const, outputs, finishedAt: Date.now() };

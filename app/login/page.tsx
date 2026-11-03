@@ -23,8 +23,8 @@ export default function LoginPage() {
   return (
     <div className="login">
       <form className="login-box" onSubmit={submit}>
-        <div className="logo big">AI</div>
-        <h1>AI Studio</h1>
+        <div className="logo big"><img src="/logo.png" alt="" /></div>
+        <h1>MetaFrame AI</h1>
         <p className="muted small">Nano Banana · Soul · Seedance · Kling</p>
         <input type="password" autoFocus placeholder="Пароль" value={password} onChange={(e) => setPassword(e.target.value)} />
         {error && <div className="err small">{error}</div>}

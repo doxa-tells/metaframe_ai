@@ -5,6 +5,7 @@ import { SoulIdPicker } from "./SoulIdPicker";
 import { Icon } from "./Icon";
 
 type Props = {
+  showAll?: boolean;
   specs: ParamSpec[];
   values: Record<string, unknown>;
   onChange: (key: string, v: unknown) => void;
@@ -55,10 +56,10 @@ function Control({ p, value, onChange }: { p: ParamSpec; value: unknown; onChang
   }
 }
 
-export function ParamControls({ specs, values, onChange }: Props) {
+export function ParamControls({ specs, values, onChange, showAll }: Props) {
   const [adv, setAdv] = useState(false);
-  const basic = specs.filter((p) => !p.advanced);
-  const advanced = specs.filter((p) => p.advanced);
+  const basic = showAll ? specs : specs.filter((p) => !p.advanced);
+  const advanced = showAll ? [] : specs.filter((p) => p.advanced);
   const hideStrength = !values.custom_reference_id;
   const render = (p: ParamSpec) => {
     if (p.key === "custom_reference_strength" && hideStrength) return null;

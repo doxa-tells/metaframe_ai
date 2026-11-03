@@ -1,20 +1,59 @@
 import "server-only";
 import { promises as fs } from "fs";
 import path from "path";
+import { createHmac, randomUUID } from "crypto";
 import { put, list, del } from "@vercel/blob";
 
-// Хранилище: Vercel Blob в продакшене, локальная папка .data для разработки.
-// Все записи неизменяемые (новый файл вместо перезаписи), потому что публичные
-// файлы Blob кешируются CDN и перезапись читалась бы со старым содержимым.
+// Хранилище: Cloudflare R2 через воркер (основной вариант), Vercel Blob (запасной)
+// или локальная папка .data для разработки.
+// Все записи неизменяемые (новый файл вместо перезаписи): файлы отдаются с долгим кешем.
 
-export const useBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+const WORKER_URL = (process.env.STORAGE_URL || "").trim().replace(/\/$/, "");
+const WORKER_SECRET = (process.env.STORAGE_SECRET || "").trim();
+export const useWorker = Boolean(WORKER_URL && WORKER_SECRET);
+export const useBlob = !useWorker && Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+export const storageMode: "worker" | "blob" | "local" = useWorker ? "worker" : useBlob ? "blob" : "local";
+
+const encKey = (key: string) => key.split("/").map(encodeURIComponent).join("/");
+const workerUrl = (key: string) => `${WORKER_URL}/f/${encKey(key)}`;
+const auth = () => ({ Authorization: `Bearer ${WORKER_SECRET}` });
+
+async function workerFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetch(input, { ...init, cache: "no-store", headers: { ...auth(), ...(init.headers ?? {}) } });
+  if (!res.ok) throw Object.assign(new Error(`Хранилище R2: ${res.status} ${(await res.text()).slice(0, 200)}`), { status: 502 });
+  return res;
+}
+
+// Подписанная ссылка для загрузки файла прямо из браузера в R2 (действует 15 минут)
+export function signUpload(fileName: string): { uploadUrl: string; url: string } {
+  const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-60) || "file";
+  const key = `uploads/${randomUUID().slice(0, 12)}-${safe}`;
+  const exp = Math.floor(Date.now() / 1000) + 15 * 60;
+  const sig = createHmac("sha256", WORKER_SECRET).update(`${key}:${exp}`).digest("hex");
+  return { uploadUrl: `${workerUrl(key)}?exp=${exp}&sig=${sig}`, url: workerUrl(key) };
+}
 const LOCAL_DIR = path.join(process.cwd(), ".data");
 
 export type StoredItem = { pathname: string; url: string };
 
 type Body = Buffer | string | ReadableStream<Uint8Array>;
 
+// На Vercel файловая система только для чтения: без Blob сохранять некуда
+export const storageMissing = storageMode === "local" && Boolean(process.env.VERCEL);
+const STORAGE_ERROR = "Хранилище не подключено: добавьте STORAGE_URL и STORAGE_SECRET в Vercel → Settings → Environment Variables и сделайте Redeploy";
+
 export async function putFile(pathname: string, body: Body, contentType: string): Promise<string> {
+  if (storageMissing) throw Object.assign(new Error(STORAGE_ERROR), { status: 503 });
+  if (useWorker) {
+    const isStream = typeof body !== "string" && !Buffer.isBuffer(body);
+    await workerFetch(workerUrl(pathname), {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: (isStream ? body : typeof body === "string" ? body : new Uint8Array(body)) as BodyInit,
+      ...(isStream ? { duplex: "half" } : {}),
+    } as RequestInit);
+    return workerUrl(pathname);
+  }
   if (useBlob) {
     const res = await put(pathname, body as never, {
       access: "public",
@@ -47,6 +86,13 @@ export async function putJSON(pathname: string, data: unknown): Promise<string> 
 }
 
 export async function listItems(prefix: string, limit = 50, cursor?: string): Promise<{ items: StoredItem[]; cursor?: string }> {
+  if (storageMissing) return { items: [] };
+  if (useWorker) {
+    const q = new URLSearchParams({ prefix, limit: String(limit) });
+    if (cursor) q.set("cursor", cursor);
+    const d = (await (await workerFetch(`${WORKER_URL}/list?${q}`)).json()) as { items: { key: string }[]; cursor: string | null };
+    return { items: d.items.map((i) => ({ pathname: i.key, url: workerUrl(i.key) })), cursor: d.cursor ?? undefined };
+  }
   if (useBlob) {
     const res = await list({ prefix, limit, cursor });
     return {
@@ -81,7 +127,7 @@ export async function listItems(prefix: string, limit = 50, cursor?: string): Pr
 
 export async function readJSON<T>(item: StoredItem | string): Promise<T | null> {
   const url = typeof item === "string" ? item : item.url;
-  if (!useBlob && url.startsWith("/api/files/")) {
+  if (storageMode === "local" && url.startsWith("/api/files/")) {
     try {
       const txt = await fs.readFile(path.join(LOCAL_DIR, url.slice("/api/files/".length)), "utf8");
       return JSON.parse(txt) as T;
@@ -96,6 +142,10 @@ export async function readJSON<T>(item: StoredItem | string): Promise<T | null> 
 
 export async function deleteItems(items: StoredItem[]): Promise<void> {
   if (!items.length) return;
+  if (useWorker) {
+    await Promise.all(items.map((i) => workerFetch(workerUrl(i.pathname), { method: "DELETE" })));
+    return;
+  }
   if (useBlob) {
     await del(items.map((i) => i.url));
     return;

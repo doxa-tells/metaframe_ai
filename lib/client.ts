@@ -14,7 +14,8 @@ export const isTerminal = (s: JobStatus) => TERMINAL.includes(s);
 
 export type AppConfig = {
   mock: boolean;
-  storage: "blob" | "local";
+  storage: "worker" | "blob" | "local";
+  storageMissing?: boolean;
   providers: { google: boolean; higgsfield: boolean; byteplus: boolean; anthropic: boolean };
 };
 
@@ -56,7 +57,16 @@ export const saveGraph = (g: { id?: string; name: string; nodes: unknown[]; edge
   api<{ id: string }>("/api/graphs", { method: "POST", body: JSON.stringify(g) }).then((r) => r.id);
 
 // Загрузка файла: напрямую в Vercel Blob или через сервер в локальном режиме
-export async function uploadFile(file: File, storage: "blob" | "local"): Promise<string> {
+export async function uploadFile(file: File, storage: "worker" | "blob" | "local"): Promise<string> {
+  if (storage === "worker") {
+    if (file.size > 95 * 1024 * 1024) throw new Error("Файл больше 95 МБ");
+    const { uploadUrl, url } = await api<{ uploadUrl: string; url: string }>("/api/upload/sign", {
+      method: "POST", body: JSON.stringify({ name: file.name, contentType: file.type }),
+    });
+    const r = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } });
+    if (!r.ok) throw new Error(`Не удалось загрузить файл (${r.status})`);
+    return url;
+  }
   if (storage === "blob") {
     const { upload } = await import("@vercel/blob/client");
     const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-60) || "file";

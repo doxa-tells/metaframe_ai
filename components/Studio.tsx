@@ -1,11 +1,12 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { MODELS, defaultParams, estimateCost, formatUsd, getMode, getModel, validateRequest, type Kind } from "@/lib/models";
 import { cancelJob, deleteJob, generate, isTerminal, listJobs, waitForJob, type Job } from "@/lib/client";
 import { useApp } from "./AppContext";
-import { History } from "./History";
-import { MediaInput } from "./MediaInput";
-import { ParamControls } from "./ParamControls";
+import { Gallery } from "./Gallery";
+import { Composer } from "./Composer";
+import { VideoPanel } from "./VideoPanel";
 import { Icon } from "./Icon";
 
 type FormState = {
@@ -24,15 +25,14 @@ function initialForm(kind: Kind): FormState {
 }
 
 export function Studio({ kind }: { kind: Kind }) {
-  const { registerInsert, setChatContext, sendToChat, config } = useApp();
+  const { registerInsert, setChatContext, config } = useApp();
+  const router = useRouter();
   const storeKey = `studio.${kind}.v1`;
   const [form, setForm] = useState<FormState>(() => initialForm(kind));
   const [jobs, setJobs] = useState<Job[]>([]);
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [modelMenu, setModelMenu] = useState(false);
   const loaded = useRef(false);
   const polling = useRef(new Set<string>());
   const alive = useRef({ cancelled: false });
@@ -50,6 +50,17 @@ export function Studio({ kind }: { kind: Kind }) {
       if (raw) {
         const saved = JSON.parse(raw) as FormState;
         if (getModel(saved.modelId)?.kind === kind) setForm(saved);
+      }
+      // Кадр, переданный из раздела «Фото» кнопкой «Анимировать»
+      const hand = localStorage.getItem("handoff.animate");
+      if (hand && kind === "video") {
+        localStorage.removeItem("handoff.animate");
+        setForm((f) => {
+          const m = getModel(f.modelId) ?? MODELS.find((x) => x.kind === "video")!;
+          const mode = m.modes.find((x) => x.inputs.some((i) => i.key === "image_url")) ?? m.modes[0];
+          const kk = k(m.id, mode.id);
+          return { ...f, modelId: m.id, modeId: mode.id, inputs: { ...f.inputs, [kk]: { ...(f.inputs[kk] ?? {}), image_url: [hand] } } };
+        });
       }
     } catch { /* ignore */ }
     loaded.current = true;
@@ -104,7 +115,6 @@ export function Studio({ kind }: { kind: Kind }) {
   function setModel(id: string) {
     const m = getModel(id)!;
     setForm((f) => ({ ...f, modelId: id, modeId: m.modes.some((x) => x.id === f.modeId) ? f.modeId : m.modes[0].id }));
-    setModelMenu(false);
   }
   function setParam(pk: string, v: unknown) {
     setForm((f) => ({ ...f, params: { ...f.params, [key]: { ...params, [pk]: v } } }));
@@ -118,10 +128,11 @@ export function Studio({ kind }: { kind: Kind }) {
   const cost = estimateCost(request);
   const KEY_ENV = { google: "GEMINI_API_KEY", byteplus: "ARK_API_KEY", higgsfield: "HF_API_KEY" } as const;
   const providerReady = !config || config.mock || config.providers[model.provider];
+  const missingKey = providerReady ? null : `Не задан ключ ${KEY_ENV[model.provider]} в настройках Vercel`;
 
+  // Можно запускать несколько генераций подряд, не дожидаясь первой
   async function submit() {
-    if (validation || submitting) return;
-    setSubmitting(true);
+    if (validation || !providerReady) return;
     setError(null);
     const tempId = `temp-${Date.now()}`;
     const temp: Job = {
@@ -136,8 +147,6 @@ export function Studio({ kind }: { kind: Kind }) {
     } catch (e) {
       setJobs((prev) => prev.filter((j) => j.id !== tempId));
       setError((e as Error).message);
-    } finally {
-      setSubmitting(false);
     }
   }
 
@@ -150,7 +159,7 @@ export function Studio({ kind }: { kind: Kind }) {
   }
   const imageInput = mode.inputs.find((i) => i.kind === "image");
   function useAsInput(url: string) {
-    if (!imageInput) return;
+    if (!imageInput) { setError(`У ${model.name} нет референсов — выберите Nano Banana или Seedream`); return; }
     const cur = inputs[imageInput.key] ?? [];
     if (cur.length >= imageInput.max) { setError(`${imageInput.label}: максимум ${imageInput.max}`); return; }
     setInput(imageInput.key, [...cur, url]);
@@ -160,88 +169,55 @@ export function Studio({ kind }: { kind: Kind }) {
     setJobs((prev) => prev.filter((j) => j.id !== job.id));
     try { await deleteJob(job.id); } catch (e) { setError((e as Error).message); }
   }
+  function animate(url: string) {
+    try { localStorage.setItem("handoff.animate", url); } catch { /* ignore */ }
+    router.push("/video");
+  }
   async function cancel(job: Job) {
     try { await cancelJob(job); } catch (e) { setError((e as Error).message); }
   }
 
   const models = MODELS.filter((m) => m.kind === kind);
+  const shared = {
+    models, model, mode, prompt: form.prompt, params, inputs, cost, validation, error, missingKey,
+    onModel: setModel,
+    onMode: (id: string) => setForm((f) => ({ ...f, modeId: id })),
+    onPrompt: (v: string) => setForm((f) => ({ ...f, prompt: v })),
+    onParam: setParam,
+    onInput: setInput,
+    onSubmit: submit,
+  };
+  const gallery = (
+    <Gallery
+      jobs={jobs}
+      layout={kind === "image" ? "justified" : "grouped"}
+      loading={loading}
+      hasMore={Boolean(cursor)}
+      onLoadMore={() => load(cursor)}
+      onReuse={reuse}
+      onUseAsInput={kind === "image" ? useAsInput : undefined}
+      onAnimate={kind === "image" ? animate : undefined}
+      onDelete={remove}
+      onCancel={cancel}
+      emptyText={kind === "image" ? "Здесь появятся ваши изображения" : "Здесь появятся ваши видео"}
+    />
+  );
 
+  if (kind === "image") {
+    return (
+      <div className="istudio">
+        <div className="iscroll">{gallery}</div>
+        <div className="composer-dock"><Composer {...shared} /></div>
+      </div>
+    );
+  }
   return (
-    <div className="studio">
-      <section className="panel">
-        <div className="model-picker">
-          <button className="model-current" onClick={() => setModelMenu(!modelMenu)}>
-            <div>
-              <div className="model-name">{model.name} {model.badge && <span className="badge">{model.badge}</span>}</div>
-              <div className="muted small">{model.vendor} · {model.description}</div>
-            </div>
-            <Icon name="chevron" size={16} className={modelMenu ? "rot" : ""} />
-          </button>
-          {modelMenu && (
-            <div className="model-menu">
-              {models.map((m) => (
-                <button key={m.id} className={`model-opt ${m.id === model.id ? "on" : ""}`} onClick={() => setModel(m.id)}>
-                  <div className="model-name">{m.name} {m.badge && <span className="badge">{m.badge}</span>}</div>
-                  <div className="muted small">{m.vendor} · {m.description}</div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {model.modes.length > 1 && (
-          <div className="tabs">
-            {model.modes.map((m) => (
-              <button key={m.id} className={m.id === mode.id ? "on" : ""} onClick={() => setForm((f) => ({ ...f, modeId: m.id }))}>{m.label}</button>
-            ))}
-          </div>
-        )}
-        {mode.hint && <div className="hint small">{mode.hint}</div>}
-
-        {mode.inputs.map((spec) => (
-          <MediaInput key={key + spec.key} spec={spec} value={inputs[spec.key] ?? []} onChange={(v) => setInput(spec.key, v)} />
-        ))}
-
-        <div className="field">
-          <div className="field-label row between">
-            <span>Промпт{mode.promptRequired && <span className="req">*</span>}</span>
-            <button className="linkbtn" disabled={!form.prompt.trim()} onClick={() => sendToChat({ text: `Улучши промпт для ${model.name}:\n${form.prompt}` })}>
-              <Icon name="sparkle" size={14} /> Улучшить в чате
-            </button>
-          </div>
-          <textarea
-            className="prompt"
-            value={form.prompt}
-            placeholder={kind === "image" ? "Опишите изображение…" : "Опишите сцену, действие и движение камеры…"}
-            onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))}
-            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }}
-            rows={5}
-          />
-        </div>
-
-        <ParamControls specs={mode.params} values={params} onChange={setParam} />
-
-        <div className="generate-bar">
-          {error && <div className="err small">{error}</div>}
-          {!providerReady && <div className="err small">Ключ {KEY_ENV[model.provider]} не задан</div>}
-          <button className="btn accent wide big" disabled={Boolean(validation) || submitting || !providerReady} onClick={submit}
-            title={validation ?? "Ctrl/Cmd + Enter"}>
-            {submitting && model.kind === "image" && model.provider !== "higgsfield" ? <><div className="spinner" /> Генерирую…</> : <><Icon name="sparkle" size={16} /> Сгенерировать · ≈{formatUsd(cost)}</>}
-          </button>
-          <div className="muted tiny-text">{validation ?? model.priceNote}</div>
-        </div>
+    <div className="vstudio">
+      <VideoPanel {...shared} />
+      <section className="vhistory">
+        <div className="vh-head"><span className="vh-tab"><Icon name="folder" size={14} /> История</span></div>
+        <div className="vh-scroll">{gallery}</div>
       </section>
-
-      <History
-        jobs={jobs}
-        loading={loading}
-        hasMore={Boolean(cursor)}
-        onLoadMore={() => load(cursor)}
-        onReuse={reuse}
-        onUseAsInput={imageInput ? useAsInput : undefined}
-        onDelete={remove}
-        onCancel={cancel}
-      />
     </div>
   );
 }

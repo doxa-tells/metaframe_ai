@@ -23,6 +23,17 @@ const PATHS: Record<string, string> = {
   stop: "M7 7h10v10H7z",
   chevron: "M8 10l4 4 4-4",
   reuse: "M4 7h12l-3-3M20 17H8l3 3",
+  ratio: "M5 7h14v10H5z",
+  check: "M5 12l5 5 9-10",
+  pencil: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
+  gem: "M6 4h12l3 5-9 11L3 9zM3 9h18M9 4l3 16M15 4l-3 16",
+  clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
+  sound: "M4 9h4l5-4v14l-5-4H4zM16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
+  film: "M4 4h16v16H4zM8 4v16M16 4v16M4 8h4M4 12h4M4 16h4M16 8h4M16 12h4M16 16h4",
+  layers: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5",
+  at: "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-4 7.5",
+  sliders: "M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4",
 };
 
 export function Icon({ name, size = 18, className }: { name: string; size?: number; className?: string }) {
