@@ -117,10 +117,10 @@ export function Studio({ kind }: { kind: Kind }) {
     setForm((f) => ({ ...f, modelId: id, modeId: m.modes.some((x) => x.id === f.modeId) ? f.modeId : m.modes[0].id }));
   }
   function setParam(pk: string, v: unknown) {
-    setForm((f) => ({ ...f, params: { ...f.params, [key]: { ...params, [pk]: v } } }));
+    setForm((f) => ({ ...f, params: { ...f.params, [key]: { ...(f.params[key] ?? params), [pk]: v } } }));
   }
   function setInput(ik: string, v: string[]) {
-    setForm((f) => ({ ...f, inputs: { ...f.inputs, [key]: { ...inputs, [ik]: v } } }));
+    setForm((f) => ({ ...f, inputs: { ...f.inputs, [key]: { ...(f.inputs[key] ?? inputs), [ik]: v } } }));
   }
 
   const request = { modelId: model.id, modeId: mode.id, prompt: form.prompt, params, inputs };

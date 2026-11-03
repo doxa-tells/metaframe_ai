@@ -20,7 +20,11 @@ const auth = () => ({ Authorization: `Bearer ${WORKER_SECRET}` });
 
 async function workerFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const res = await fetch(input, { ...init, cache: "no-store", headers: { ...auth(), ...(init.headers ?? {}) } });
-  if (!res.ok) throw Object.assign(new Error(`Хранилище R2: ${res.status} ${(await res.text()).slice(0, 200)}`), { status: 502 });
+  if (!res.ok) {
+    const text = (await res.text()).trim();
+    const detail = text.startsWith("<") ? "" : ` ${text.slice(0, 160)}`;
+    throw Object.assign(new Error(`Хранилище R2 не ответило (${res.status})${detail}`), { status: 502 });
+  }
   return res;
 }
 

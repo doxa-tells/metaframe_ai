@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getModel, formatUsd } from "@/lib/models";
 import { isTerminal, STATUS_LABEL, timeAgo, type Job, type JobOutput } from "@/lib/client";
 import { useApp } from "./AppContext";
@@ -31,12 +31,31 @@ function Elapsed({ from }: { from: number }) {
   return <>{Math.floor(s / 60)}:{String(s % 60).padStart(2, "0")}</>;
 }
 
-// Соотношение сторон до загрузки — из параметров генерации
-function guessAspect(job: Job): number {
+// Первый референс-картинка задачи (по порядку входов модели)
+function firstImageRef(job: Job): string | null {
+  const mode = getModel(job.modelId)?.modes.find((m) => m.id === job.modeId);
+  for (const s of mode?.inputs ?? []) {
+    if (s.kind !== "image") continue;
+    const u = (job.inputs?.[s.key] ?? []).find(Boolean);
+    if (u) return u;
+  }
+  return null;
+}
+
+// Соотношение сторон до загрузки: явный формат, иначе («Авто») — как у первого референса
+function guessAspect(job: Job, refAspects: Record<string, number>): number {
   const ar = String(job.params.aspect_ratio ?? "");
   const m = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(ar);
   if (m) return Number(m[1]) / Number(m[2]);
+  const ref = firstImageRef(job);
+  if (ref && refAspects[ref]) return refAspects[ref];
   return job.kind === "video" ? 16 / 9 : 3 / 4;
+}
+
+// Сколько картинок ждём от задачи
+function expectedCount(job: Job): number {
+  const n = Number(job.params.count ?? job.params.batch_size ?? job.params.num_images ?? 1);
+  return Number.isFinite(n) && n > 1 ? Math.min(Math.floor(n), 8) : 1;
 }
 
 function dayLabel(ts: number): string {
@@ -55,10 +74,28 @@ export function Gallery(p: Props) {
   const [aspects, setAspects] = useState<Record<string, number>>({});
   const [copied, setCopied] = useState<string | null>(null);
 
+  const [refAspects, setRefAspects] = useState<Record<string, number>>({});
+  const measuring = useRef(new Set<string>());
+
+  // Замеряем первый референс у задач в процессе, чтобы заглушка сразу была нужной формы
+  useEffect(() => {
+    for (const job of p.jobs) {
+      if (isTerminal(job.status)) continue;
+      const ref = firstImageRef(job);
+      if (!ref || measuring.current.has(ref)) continue;
+      measuring.current.add(ref);
+      const img = new Image();
+      img.onload = () => { if (img.naturalWidth && img.naturalHeight) setRefAspects((a) => ({ ...a, [ref]: img.naturalWidth / img.naturalHeight })); };
+      img.src = ref;
+    }
+  }, [p.jobs]);
+
   const cards: Card[] = p.jobs.flatMap((job): Card[] =>
     job.status === "completed" && job.outputs.length
       ? job.outputs.map((o, index) => ({ job, index, out: o }))
-      : [{ job, index: 0, out: null }],
+      : isTerminal(job.status)
+        ? [{ job, index: 0, out: null }]
+        : Array.from({ length: expectedCount(job) }, (_, index) => ({ job, index, out: null })),
   );
   const setAspect = (url: string, w: number, h: number) => {
     if (w && h) setAspects((a) => (a[url] ? a : { ...a, [url]: w / h }));
@@ -71,7 +108,7 @@ export function Gallery(p: Props) {
 
   function tile({ job, index, out }: Card) {
     const key = `${job.id}-${index}`;
-    const ar = out ? aspects[out.url] ?? guessAspect(job) : guessAspect(job);
+    const ar = out ? aspects[out.url] ?? guessAspect(job, refAspects) : guessAspect(job, refAspects);
     const style = p.layout === "justified" ? { flexGrow: ar * 100, flexBasis: `${ar * 260}px` } : undefined;
     const model = getModel(job.modelId);
     const ratioBox = p.layout === "justified" ? <i className="ratio" style={{ paddingBottom: `${100 / ar}%` }} /> : null;

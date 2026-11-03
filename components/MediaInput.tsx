@@ -12,9 +12,9 @@ const ACCEPT: Record<string, string> = {
 };
 
 export function MediaThumb({ url, kind }: { url: string; kind: string }) {
-  if (kind === "video" || /\.(mp4|mov|webm)(\?|$)/i.test(url)) return <video src={url} muted playsInline preload="metadata" />;
+  if (kind === "video" || /\.(mp4|mov|webm)(\?|$)/i.test(url)) return <video src={url} muted playsInline preload="metadata" draggable={false} />;
   if (kind === "audio" || /\.(wav|mp3)(\?|$)/i.test(url)) return <div className="audio-thumb"><Icon name="play" size={16} /> аудио</div>;
-  return <img src={url} alt="" />;
+  return <img src={url} alt="" draggable={false} />;
 }
 
 export function MediaInput({ spec, value, onChange }: { spec: InputSpec; value: string[]; onChange: (v: string[]) => void }) {

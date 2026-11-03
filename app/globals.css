@@ -292,6 +292,13 @@ textarea.prompt { min-height: 110px; font-size: 14px; }
 .comp-thumb { position: relative; width: 52px; height: 52px; border-radius: 10px; overflow: hidden; background: #2a2b31; flex-shrink: 0; }
 .comp-thumb img, .comp-thumb video { width: 100%; height: 100%; object-fit: cover; }
 .comp-thumb.loading { display: grid; place-items: center; }
+.comp-thumb.loading img, .comp-thumb.loading video, .vthumb.loading img, .vthumb.loading video, .vslot .pend { position: absolute; inset: 0; opacity: .45; filter: blur(1px); }
+.comp-thumb.loading .spinner, .vthumb.loading .spinner { position: relative; z-index: 1; }
+.vthumb.loading { display: grid; place-items: center; }
+.vslot-loading { position: absolute; inset: 0; display: grid; place-items: center; z-index: 1; }
+.comp-thumb[draggable="true"], .vthumb[draggable="true"], .vslot[draggable="true"] { cursor: grab; }
+.comp-thumb[draggable="true"]:active, .vthumb[draggable="true"]:active { cursor: grabbing; }
+.comp-thumb[data-over], .vthumb[data-over] { outline: 2px solid var(--accent); outline-offset: 1px; }
 .comp-thumb .tag { position: absolute; left: 3px; bottom: 3px; font-size: 9.5px; background: rgba(0,0,0,.7); border-radius: 5px; padding: 1px 4px; max-width: 58px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .comp-thumb button { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%; border: none; background: rgba(0,0,0,.75); color: #fff; display: grid; place-items: center; cursor: pointer; opacity: 0; padding: 0; }
 .comp-thumb:hover button { opacity: 1; }

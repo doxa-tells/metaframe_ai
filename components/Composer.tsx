@@ -127,19 +127,25 @@ export function Composer(p: Props) {
 
   return (
     <div className={`composer ${drag ? "drag" : ""}`}
-      onDragOver={(e) => { e.preventDefault(); if (p.mode.inputs.length) setDrag(true); }}
+      onDragOver={(e) => { e.preventDefault(); if (p.mode.inputs.length && !up.isRefDrag(e)) setDrag(true); }}
       onDragLeave={() => setDrag(false)}
       onDrop={(e) => { setDrag(false); up.onDrop(e); }}>
       {hasThumbs && (
         <div className="comp-thumbs">
           {p.mode.inputs.map((s) => valueOf(s).map((u, i) => (
-            <div key={s.key + u + i} className="comp-thumb" title={s.label}>
+            <div key={s.key + u + i} className="comp-thumb" title={`${s.label} — перетащите, чтобы поменять порядок`} {...up.dragProps(s, i)}>
               <MediaThumb url={u} kind={s.kind} />
               <span className="tag">{s.max === 1 ? s.label : `${s.kind === "image" ? "" : s.kind === "video" ? "▶ " : "♪ "}${i + 1}`}</span>
               <button type="button" onClick={() => p.onInput(s.key, valueOf(s).filter((_, j) => j !== i))} aria-label="Убрать"><Icon name="x" size={11} /></button>
             </div>
           )))}
-          {uploading > 0 && <div className="comp-thumb loading"><div className="spinner" /></div>}
+          {up.pending.map((f) => (
+            <div key={f.id} className="comp-thumb loading">
+              {f.kind === "image" && <img src={f.preview} alt="" draggable={false} />}
+              {f.kind === "video" && <video src={f.preview} muted draggable={false} />}
+              <div className="spinner" />
+            </div>
+          ))}
         </div>
       )}
 

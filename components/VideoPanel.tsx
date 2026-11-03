@@ -68,13 +68,20 @@ export function VideoPanel(p: Props) {
 
   function slot(s: InputSpec) {
     const v = valueOf(s)[0];
+    const pend = up.pending.find((x) => x.key === s.key);
     return (
       <div key={s.key} className={`vslot ${dragKey === s.key ? "drag" : ""} ${v ? "filled" : ""}`}
+        {...(v ? { draggable: true, onDragStart: up.dragProps(s, 0).onDragStart } : {})}
         onDragOver={(e) => { e.preventDefault(); setDragKey(s.key); }}
         onDragLeave={() => setDragKey(null)}
         onDrop={(e) => { setDragKey(null); up.onDrop(e, s); }}
         onClick={() => !v && up.pick(s)}>
-        {v ? (
+        {pend ? (
+          <>
+            {pend.kind === "image" ? <img className="pend" src={pend.preview} alt="" draggable={false} /> : <video className="pend" src={pend.preview} muted draggable={false} />}
+            <div className="vslot-loading"><div className="spinner" /></div>
+          </>
+        ) : v ? (
           <>
             <MediaThumb url={v} kind={s.kind} />
             <button className="vx" onClick={(e) => { e.stopPropagation(); p.onInput(s.key, []); }} aria-label="Убрать"><Icon name="x" size={12} /></button>
@@ -157,13 +164,14 @@ export function VideoPanel(p: Props) {
 
         {multis.length > 0 && (() => {
           const all = multis.flatMap((s) => valueOf(s).map((u, i) => ({ s, u, i })));
+          const pend = up.pending.filter((x) => multis.some((s) => s.key === x.key));
           const total = multis.reduce((n, s) => n + s.max, 0);
           return (
             <div className={`vdrop ${dragKey === "multi" ? "drag" : ""} ${all.length ? "has" : ""}`}
-              onDragOver={(e) => { e.preventDefault(); setDragKey("multi"); }}
+              onDragOver={(e) => { e.preventDefault(); if (!up.isRefDrag(e)) setDragKey("multi"); }}
               onDragLeave={() => setDragKey(null)}
               onDrop={(e) => { setDragKey(null); up.onDrop(e); }}>
-              {all.length === 0 ? (
+              {all.length === 0 && pend.length === 0 ? (
                 <button className="vdrop-empty" onClick={() => up.pickAny()}>
                   <span className="vdrop-icons">{multis.map((s) => <span key={s.key}><Icon name={KIND_ICON[s.kind]} size={16} /></span>)}</span>
                   <b>{multis.length > 1 ? "Добавить референсы" : multis[0].label}</b>
@@ -171,23 +179,28 @@ export function VideoPanel(p: Props) {
                 </button>
               ) : (
                 <>
-                  <div className="vdrop-head"><span>{multis.length > 1 ? "Референсы" : multis[0].label}</span><span className="muted small">{all.length}/{total}</span></div>
+                  <div className="vdrop-head"><span>{multis.length > 1 ? "Референсы" : multis[0].label}</span><span className="muted small">{all.length + pend.length}/{total}</span></div>
                   <div className="vthumbs">
                     {all.map(({ s, u, i }) => (
-                      <div key={s.key + u + i} className="vthumb" title={s.label}>
+                      <div key={s.key + u + i} className="vthumb" title={`${s.label} — перетащите, чтобы поменять порядок`} {...up.dragProps(s, i)}>
                         <MediaThumb url={u} kind={s.kind} />
                         <span className="tag">{s.kind === "image" ? "Ф" : s.kind === "video" ? "В" : "А"}{i + 1}</span>
                         <button onClick={() => p.onInput(s.key, valueOf(s).filter((_, j) => j !== i))} aria-label="Убрать"><Icon name="x" size={11} /></button>
                       </div>
                     ))}
-                    {all.length < total && <button className="vthumb add" onClick={() => up.pickAny()}><Icon name="plus" size={16} /></button>}
+                    {pend.map((f) => (
+                      <div key={f.id} className="vthumb loading">
+                        {f.kind === "image" ? <img src={f.preview} alt="" draggable={false} /> : f.kind === "video" ? <video src={f.preview} muted draggable={false} /> : null}
+                        <div className="spinner" />
+                      </div>
+                    ))}
+                    {all.length + pend.length < total && <button className="vthumb add" onClick={() => up.pickAny()}><Icon name="plus" size={16} /></button>}
                   </div>
                 </>
               )}
             </div>
           );
         })()}
-        {up.uploading > 0 && <div className="muted small row gap8"><div className="spinner" /> Загружаю {up.uploading}…</div>}
 
         <div className="vprompt">
           <div className="vprompt-label">Промпт</div>
