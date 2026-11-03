@@ -1,0 +1,104 @@
+"use client";
+import type { GenRequest, Kind } from "./models";
+
+export type JobStatus = "queued" | "in_progress" | "completed" | "failed" | "nsfw" | "canceled";
+export type JobOutput = { url: string; type: "image" | "video" };
+export type Job = {
+  id: string; kind: Kind; modelId: string; modeId: string; prompt: string;
+  params: Record<string, unknown>; inputs: Record<string, string[]>; cost: number;
+  provider: string; providerRequestId?: string; status: JobStatus; outputs: JobOutput[];
+  error?: string; createdAt: number; finishedAt?: number;
+};
+export const TERMINAL: JobStatus[] = ["completed", "failed", "nsfw", "canceled"];
+export const isTerminal = (s: JobStatus) => TERMINAL.includes(s);
+
+export type AppConfig = {
+  mock: boolean;
+  storage: "blob" | "local";
+  providers: { google: boolean; higgsfield: boolean; byteplus: boolean; anthropic: boolean };
+};
+
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: init?.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json", ...(init?.headers ?? {}) } : init?.headers,
+  });
+  if (res.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Нужен вход");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as { error?: string }).error || `Ошибка ${res.status}`);
+  return data as T;
+}
+
+export const getConfig = () => api<AppConfig>("/api/config");
+export const generate = (req: GenRequest) => api<{ job: Job }>("/api/generate", { method: "POST", body: JSON.stringify(req) }).then((r) => r.job);
+export const listJobs = (kind: Kind, cursor?: string) =>
+  api<{ jobs: Job[]; cursor?: string }>(`/api/jobs?kind=${kind}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`);
+export const pollJob = (job: Job) =>
+  api<{ job: Partial<Job> & { id: string; status: JobStatus } }>("/api/jobs/poll", {
+    method: "POST", body: JSON.stringify({ id: job.id, providerRequestId: job.providerRequestId }),
+  }).then((r) => r.job);
+export const cancelJob = (job: Job) => api("/api/jobs/cancel", { method: "POST", body: JSON.stringify({ providerRequestId: job.providerRequestId }) });
+export const deleteJob = (id: string) => api(`/api/jobs/${id}`, { method: "DELETE" });
+
+export type SoulId = { id: string; name: string; status: string; thumbnail?: string };
+export const listSoulIds = () => api<{ items: SoulId[] }>("/api/soul-ids").then((r) => r.items);
+export const createSoulId = (name: string, images: string[]) =>
+  api<{ item: SoulId }>("/api/soul-ids", { method: "POST", body: JSON.stringify({ name, images }) }).then((r) => r.item);
+
+export type GraphMeta = { id: string; name: string; savedAt: number };
+export const listGraphs = () => api<{ graphs: GraphMeta[] }>("/api/graphs").then((r) => r.graphs);
+export const loadGraph = (id: string) =>
+  api<{ graph: { id: string; name: string; nodes: unknown[]; edges: unknown[] } | null }>(`/api/graphs?id=${id}`).then((r) => r.graph);
+export const saveGraph = (g: { id?: string; name: string; nodes: unknown[]; edges: unknown[] }) =>
+  api<{ id: string }>("/api/graphs", { method: "POST", body: JSON.stringify(g) }).then((r) => r.id);
+
+// Загрузка файла: напрямую в Vercel Blob или через сервер в локальном режиме
+export async function uploadFile(file: File, storage: "blob" | "local"): Promise<string> {
+  if (storage === "blob") {
+    const { upload } = await import("@vercel/blob/client");
+    const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-60) || "file";
+    const res = await upload(`uploads/${safe}`, file, { access: "public", handleUploadUrl: "/api/upload/blob" });
+    return res.url;
+  }
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await api<{ url: string }>("/api/upload", { method: "POST", body: fd });
+  return r.url;
+}
+
+// Ожидание завершения задачи с нарастающим интервалом
+export async function waitForJob(job: Job, onUpdate?: (j: Job) => void, signal?: { cancelled: boolean }): Promise<Job> {
+  let current = job;
+  let delay = 2500;
+  while (!isTerminal(current.status) && current.providerRequestId) {
+    await new Promise((r) => setTimeout(r, delay));
+    if (signal?.cancelled) return current;
+    try {
+      const upd = await pollJob(current);
+      current = { ...current, ...upd } as Job;
+      onUpdate?.(current);
+    } catch (e) {
+      // временные сбои сети — продолжаем
+      console.warn(e);
+    }
+    delay = Math.min(10000, delay * 1.3);
+  }
+  return current;
+}
+
+export function timeAgo(ts: number): string {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return `${s} с назад`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} мин назад`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ч назад`;
+  return new Date(ts).toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+
+export const STATUS_LABEL: Record<JobStatus, string> = {
+  queued: "В очереди", in_progress: "Генерируется", completed: "Готово", failed: "Ошибка", nsfw: "Модерация", canceled: "Отменено",
+};
