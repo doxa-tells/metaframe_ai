@@ -501,5 +501,9 @@ h1, h2, h3, h4, .day h3, .hero-title, .chat-title, .modal-head b, .palette-title
 .login-box .btn.accent:hover:not(:disabled) { filter: brightness(1.12); }
 .login-box .btn.accent:disabled { filter: grayscale(.7) brightness(.6); opacity: 1; }
 
-/* Без теней у текста и картинок поверх фона */
-.gen-btn, .vgen, .login-box .btn.accent, .hero-title, .hero-sub, .tile-cap { text-shadow: none; }
+/* Тень под белым текстом на хромовых кнопках */
+.gen-btn, .vgen, .login-box .btn.accent { text-shadow: 0 1px 2px rgba(0,20,30,.85), 0 0 10px rgba(0,30,40,.6); }
+/* Список моделей под карточкой модели — по ширине панели, без обрезки */
+.hero-wrap .popover { width: 100% !important; left: 0; right: 0; }
+.hero-wrap .opt-hint { white-space: normal; }
+.hero-title, .hero-sub { padding-right: 58px; }
