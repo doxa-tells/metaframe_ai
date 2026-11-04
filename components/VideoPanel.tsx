@@ -61,7 +61,21 @@ export function VideoPanel(p: Props) {
   const audio = p.mode.params.find((x) => x.key === "generate_audio");
   const cards = p.mode.params.filter((x) => x.type === "select" || x.type === "slider");
   const touched = Boolean(p.prompt.trim()) || p.mode.inputs.some((s) => valueOf(s).length > 0);
-  const message = up.error ?? p.error ?? p.missingKey ?? (touched ? p.validation : null);
+  const [tried, setTried] = useState(false);
+  const [nudge, setNudge] = useState(false);
+  const message = up.error ?? p.error ?? p.missingKey ?? (touched || tried ? p.validation : null);
+  // Кнопка всегда активна: если чего-то не хватает — подсказываем и ставим курсор в промпт
+  function tryGenerate() {
+    if (p.validation || p.missingKey) {
+      setTried(true);
+      setNudge(true);
+      setTimeout(() => setNudge(false), 400);
+      taRef.current?.focus();
+      return;
+    }
+    setTried(false);
+    p.onSubmit();
+  }
 
   function slot(s: InputSpec) {
     const v = valueOf(s)[0];
@@ -237,7 +251,7 @@ export function VideoPanel(p: Props) {
 
       <div className="vfoot">
         {(message || p.mode.hint) && <div className={`small ${message ? "err" : "muted"}`}>{message ?? p.mode.hint}</div>}
-        <button className="vgen" disabled={Boolean(p.validation) || Boolean(p.missingKey)} onClick={p.onSubmit} title={p.validation ?? "Ctrl/Cmd + Enter"}>
+        <button className={`vgen ${nudge ? "nudge" : ""}`} onClick={tryGenerate} title={p.validation ?? p.missingKey ?? "Ctrl/Cmd + Enter"}>
           Сгенерировать <span><Icon name="sparkle" size={15} /> {formatUsd(p.cost)}</span>
         </button>
         <div className="muted tiny-text">{p.model.priceNote}</div>

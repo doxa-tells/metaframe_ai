@@ -475,7 +475,8 @@ export function Gallery(p: Props) {
                     <div className="lb-sub">Референсы · {refs.length}</div>
                     <div className="lb-ref-grid">
                       {refs.map((r, i) => (
-                        <button key={r.url + i} type="button" className={`lb-ref ${refView === r.url ? "on" : ""}`} title={`${r.label} — открыть`}
+                        <button key={r.url + i} type="button" className={`lb-ref ${refView === r.url ? "on" : ""}`} title={`${r.label} — открыть`} draggable
+                          onDragStart={(e) => e.dataTransfer.setData("text/uri-list", r.url.startsWith("/") ? location.origin + r.url : r.url)}
                           onClick={() => setRefView(refView === r.url ? null : r.url)}>
                           <MediaThumb url={r.url} kind={r.kind} />
                           <span className="tag">{r.tag}</span>

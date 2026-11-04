@@ -13,6 +13,7 @@ const REF_MIME = "application/x-metaframe-ref";
 
 export type PendingUpload = { id: string; key: string; kind: string; preview: string };
 
+const toAbs = (u: string) => (u.startsWith("/") && typeof window !== "undefined" ? window.location.origin + u : u);
 const kindOf = (f: File) => (f.type.startsWith("video") ? "video" : f.type.startsWith("audio") ? "audio" : "image");
 
 // Загрузка референсов для режима: выбор файла, перетаскивание, вставка из буфера, перестановка
@@ -68,6 +69,7 @@ export function useUploader(mode: ModeSpec, inputs: Record<string, string[]>, on
   useEffect(() => {
     if (!hasInputs) return;
     const onPaste = (e: ClipboardEvent) => {
+      if (e.defaultPrevented || (e.target instanceof Element && e.target.closest(".chat"))) return;
       const files = Array.from(e.clipboardData?.items ?? [])
         .filter((it) => it.kind === "file")
         .map((it) => it.getAsFile())
@@ -146,7 +148,9 @@ export function useUploader(mode: ModeSpec, inputs: Record<string, string[]>, on
       "data-over": over === id ? "1" : undefined,
       onDragStart: (e: React.DragEvent) => {
         e.dataTransfer.setData(REF_MIME, JSON.stringify({ key: spec.key, index }));
-        e.dataTransfer.effectAllowed = "move";
+        const u = valueOf(spec)[index];
+        if (u) e.dataTransfer.setData("text/uri-list", toAbs(u));
+        e.dataTransfer.effectAllowed = "copyMove";
       },
       onDragOver: (e: React.DragEvent) => {
         if (!e.dataTransfer.types.includes(REF_MIME)) return;

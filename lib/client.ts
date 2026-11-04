@@ -114,3 +114,13 @@ export function timeAgo(ts: number): string {
 export const STATUS_LABEL: Record<JobStatus, string> = {
   queued: "В очереди", in_progress: "Генерируется", completed: "Готово", failed: "Ошибка", nsfw: "Модерация", canceled: "Отменено",
 };
+
+// Чаты проектов
+export type ChatMsg = { role: "user" | "assistant"; content: string; images?: string[] };
+export type ChatMeta = { id: string; name: string; count: number; updatedAt: number; hasInstructions: boolean };
+export type ChatRecord = { id: string; name: string; instructions: string; messages: ChatMsg[]; createdAt: number; updatedAt: number };
+export const listChats = () => api<{ chats: ChatMeta[] }>("/api/chats").then((r) => r.chats);
+export const getChat = (id: string) => api<{ chat: ChatRecord | null }>(`/api/chats?id=${id}`).then((r) => r.chat);
+export const saveChat = (c: Partial<ChatRecord> & { name: string }) =>
+  api<{ chat: ChatRecord }>("/api/chats", { method: "POST", body: JSON.stringify(c) }).then((r) => r.chat);
+export const deleteChatApi = (id: string) => api(`/api/chats?id=${id}`, { method: "DELETE" });

@@ -535,3 +535,31 @@ input[type=text], input[type=password], input[type=number], select, textarea { b
 input:focus, select:focus, textarea:focus { border-color: #2b4c5b; }
 .lightbox, .lightbox-side { background: #000; }
 .lb-prompt { background: var(--surface); border: 1px solid var(--line); }
+/* Чаты проектов */
+.chat-head { gap: 8px; align-items: flex-start; }
+.chat-head-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.chat-switch .pill { border: none; background: transparent; padding: 0; height: auto; gap: 6px; max-width: 100%; }
+.chat-switch .pill:hover { background: transparent; color: var(--accent); }
+.chat-switch .chat-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; display: inline-block; }
+.chat-rename { height: 28px; font-size: 13px; }
+.chat-list { display: flex; flex-direction: column; gap: 8px; }
+.chat-list .opt-list { max-height: 320px; overflow-y: auto; }
+.chat-opt-name { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.chat-instr { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.chat-instr textarea { font-size: 12.5px; resize: vertical; min-height: 110px; }
+.iconbtn.on { color: var(--accent); }
+.chat-head { flex-wrap: wrap; row-gap: 4px; }
+.chat-head-main { flex: 1 1 100%; }
+.chat-head > .row { margin-left: auto; }
+.chat-switch .chat-title { max-width: 250px; }
+.chat-opt { flex-direction: column !important; align-items: flex-start !important; }
+.chat-opt .opt-hint { white-space: normal; }
+/* Перетаскивание картинок в чат */
+.chat { position: relative; }
+.chat.drag::after { content: ""; position: absolute; inset: 6px; border: 2px dashed var(--accent); border-radius: 14px; pointer-events: none; z-index: 20; }
+.chat-drop { position: absolute; inset: 0; z-index: 19; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: rgba(0,12,16,.82); color: var(--accent); font-size: 13px; pointer-events: none; }
+.attach.loading { display: grid; place-items: center; background: var(--surface); }
+/* «Сгенерировать» всегда яркая; при нехватке данных — короткое покачивание */
+.gen-btn:disabled, .vgen:disabled { filter: none; }
+.gen-btn.nudge, .vgen.nudge { animation: nudge .35s ease; }
+@keyframes nudge { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }

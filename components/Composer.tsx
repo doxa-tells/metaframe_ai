@@ -56,7 +56,21 @@ export function Composer(p: Props) {
   const mainParams = p.mode.params.filter((x) => !x.advanced && x.key !== "custom_reference_strength");
   const extraParams = p.mode.params.filter((x) => x.advanced || (x.key === "custom_reference_strength" && p.params.custom_reference_id));
   const hasThumbs = p.mode.inputs.some((s) => valueOf(s).length) || uploading > 0;
-  const message = up.error ?? p.error ?? p.missingKey ?? (p.prompt.trim() || hasThumbs ? p.validation : null);
+  const [tried, setTried] = useState(false);
+  const [nudge, setNudge] = useState(false);
+  const message = up.error ?? p.error ?? p.missingKey ?? (p.prompt.trim() || hasThumbs || tried ? p.validation : null);
+  // Кнопка всегда активна: если чего-то не хватает — подсказываем и ставим курсор в промпт
+  function tryGenerate() {
+    if (p.validation || p.missingKey) {
+      setTried(true);
+      setNudge(true);
+      setTimeout(() => setNudge(false), 400);
+      taRef.current?.focus();
+      return;
+    }
+    setTried(false);
+    p.onSubmit();
+  }
 
   function renderParam(spec: ParamSpec) {
     const v = p.params[spec.key];
@@ -224,7 +238,7 @@ export function Composer(p: Props) {
           </button>
         </div>
 
-        <button type="button" className="gen-btn" disabled={Boolean(p.validation) || Boolean(p.missingKey)} onClick={p.onSubmit}
+        <button type="button" className={`gen-btn ${nudge ? "nudge" : ""}`} onClick={tryGenerate}
           title={p.validation ?? p.missingKey ?? "Ctrl/Cmd + Enter"}>
           <span>СГЕНЕРИРОВАТЬ</span>
           <small>≈{formatUsd(p.cost)}</small>
