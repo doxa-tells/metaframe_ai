@@ -6,7 +6,7 @@ import { asset } from "@/lib/brand";
 import { PillPopover } from "./Popover";
 
 const META: Record<BalanceRow["provider"], { name: string; models: string; emblem: string; billing: string }> = {
-  google: { name: "Google", models: "Nano Banana", emblem: "emblem-google", billing: "https://aistudio.google.com/usage" },
+  google: { name: "Google", models: "Nano Banana, Omni Flash", emblem: "emblem-google", billing: "https://aistudio.google.com/usage" },
   byteplus: { name: "BytePlus", models: "Seedream, Seedance", emblem: "emblem-seed", billing: "https://console.byteplus.com/billing/" },
   higgsfield: { name: "Higgsfield", models: "Soul, Kling, Genjutsu", emblem: "emblem-higgsfield", billing: "https://cloud.higgsfield.ai/" },
 };

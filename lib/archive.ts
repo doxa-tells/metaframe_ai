@@ -17,7 +17,7 @@ async function fetchBytes(url: string): Promise<Uint8Array> {
   let last: unknown;
   for (let i = 0; i < 3; i++) {
     try {
-      const r = await fetch(url, { cache: "no-store" });
+      const r = await fetch(url); // файлы неизменяемые — можно брать из кэша браузера
       if (!r.ok) throw new Error(`${r.status}`);
       return new Uint8Array(await r.arrayBuffer());
     } catch (e) {
@@ -73,4 +73,15 @@ export function fileNameFor(prompt: string, createdAt: number, index: number, ur
   for (let n = 2; used.has(name); n++) name = `${stamp}_${slug}_${index + 1}-${n}.${ext}`;
   used.add(name);
   return name;
+}
+
+// Скачать один оригинал сразу файлом (без перехода на другую вкладку)
+export async function downloadOriginal(url: string, name: string): Promise<void> {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(String(r.status));
+    saveBlob(await r.blob(), name);
+  } catch {
+    window.open(url, "_blank", "noopener"); // запасной путь
+  }
 }

@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getModel, formatUsd } from "@/lib/models";
-import { isTerminal, STATUS_LABEL, timeAgo, type Job, type JobOutput } from "@/lib/client";
-import { downloadItems, fileNameFor } from "@/lib/archive";
+import { ensureThumbsApi, isTerminal, STATUS_LABEL, thumbOf, timeAgo, type Job, type JobOutput } from "@/lib/client";
+import { downloadItems, downloadOriginal, fileNameFor } from "@/lib/archive";
 import { useApp } from "./AppContext";
 import { Icon } from "./Icon";
 import { PillPopover } from "./Popover";
@@ -27,6 +27,7 @@ type Props = {
   onDelete: (job: Job) => void;
   onBulkDelete: (items: BulkItem[]) => Promise<void>;
   onCancel: (job: Job) => void;
+  onJobsUpdated?: (jobs: Job[]) => void;
   emptyText: string;
 };
 
@@ -144,10 +145,33 @@ export function Gallery(p: Props) {
         ? [{ job, index: 0, out: null }]
         : Array.from({ length: expectedCount(job) }, (_, index) => ({ job, index, out: null })),
   ), [p.jobs]);
-  const cards = favOnly ? allCards.filter((c) => c.out && fav.has(cardKey(c))) : allCards;
+  const cards = useMemo(() => (favOnly ? allCards.filter((c) => c.out && fav.has(cardKey(c))) : allCards),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allCards, favOnly, fav.rev]);
   // В режиме «Избранное» догружаем историю целиком, чтобы показать все отмеченные
   const { hasMore, loading: histLoading, onLoadMore } = p;
   useEffect(() => { if (favOnly && hasMore && !histLoading) onLoadMore(); }, [favOnly, hasMore, histLoading, onLoadMore]);
+  async function saveOne(job: Job, index: number, url: string) {
+    setBusy("Скачиваю…");
+    try { await downloadOriginal(url, fileNameFor(job.prompt, job.createdAt, index, url, new Set())); }
+    finally { setBusy(null); }
+  }
+
+  // Старые картинки без превью: догенерируем понемногу в фоне
+  const thumbAsked = useRef(new Set<string>());
+  const { onJobsUpdated } = p;
+  useEffect(() => {
+    if (!onJobsUpdated) return;
+    const need = p.jobs.filter((j) => j.status === "completed" && !thumbAsked.current.has(j.id)
+      && j.outputs.some((o) => o.type === "image" && !o.thumb && !/\.svg(\?|$)/i.test(o.url))).slice(0, 6);
+    if (!need.length) return;
+    need.forEach((j) => thumbAsked.current.add(j.id));
+    const t = setTimeout(() => {
+      ensureThumbsApi(need.map((j) => j.id)).then((upd) => { if (upd.length) onJobsUpdated(upd); }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [p.jobs, onJobsUpdated]);
+
   const toggleFav = (c: { job: Job; index: number }) => fav.toggle(favKey(c.job.id, c.index)).catch((e: Error) => setNotice(e.message));
 
   // Выбирать можно готовые результаты и ошибки (их — чтобы удалить), но не то, что ещё генерируется
@@ -321,7 +345,7 @@ export function Gallery(p: Props) {
               <span className="play"><Icon name="play" size={22} /></span>
             </>
           ) : (
-            <img src={out.url} alt={job.prompt} loading="lazy" draggable
+            <img src={thumbOf(out)} alt={job.prompt} loading="lazy" decoding="async" draggable
               onLoad={(e) => setAspect(out.url, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
               onDragStart={(e) => e.dataTransfer.setData("text/uri-list", out.url)} />
           )}
@@ -333,7 +357,7 @@ export function Gallery(p: Props) {
                 <button className={`tbtn ${fav.has(key) ? "fav-on" : ""}`} title={fav.has(key) ? "Убрать из избранного" : "В избранное"} onClick={() => toggleFav(c)}>
                   <Icon name="star" size={14} />
                 </button>
-                <a className="tbtn" href={out.url} download target="_blank" rel="noreferrer" title="Скачать"><Icon name="download" size={14} /></a>
+                <button className="tbtn" title="Скачать оригинал" onClick={() => saveOne(job, index, out.url)}><Icon name="download" size={14} /></button>
                 <button className="tbtn" title={copied === job.id ? "Скопировано" : "Копировать промпт"} onClick={() => copyPrompt(job)}>
                   <Icon name={copied === job.id ? "check" : "copy"} size={14} />
                 </button>
@@ -414,6 +438,7 @@ export function Gallery(p: Props) {
         ) : (
           <>
             {notice && <span className="gbar-note">{notice}</span>}
+            {busy && <span className="gbar-busy"><span className="spinner" />{busy}</span>}
             <button className={`pill ${favOnly ? "on" : ""}`} onClick={() => { clearSel(); setView({ fav: !favOnly }); }} title="Показать только избранное">
               <Icon name="star" size={15} className={favOnly ? "fav-on" : ""} />Избранное{fav.size ? <span className="muted"> {fav.size}</span> : null}
             </button>
@@ -550,7 +575,7 @@ export function Gallery(p: Props) {
                   {curIsImage && (
                     <button className="btn" onClick={() => { sendToChat({ images: [curUrl], text: "Разбери этот кадр и предложи промпт для похожего" }); setOpen(null); }}><Icon name="chat" size={14} /> Обсудить в чате</button>
                   )}
-                  <a className="btn" href={curUrl} download target="_blank" rel="noreferrer"><Icon name="download" size={14} /> Скачать</a>
+                  <button className="btn" onClick={() => saveOne(open.job, open.index, curUrl)}><Icon name="download" size={14} /> Скачать оригинал</button>
                 </div>
               </div>
             </div>

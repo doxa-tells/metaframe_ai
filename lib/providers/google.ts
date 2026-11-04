@@ -77,3 +77,67 @@ async function nanoBananaOnce(p: NanoParams): Promise<{ data: Buffer; mimeType: 
   }
   return out;
 }
+
+// ---------- Gemini Omni Flash: видео через Interactions API (в фоне, с опросом) ----------
+export const OMNI_MODEL = process.env.GEMINI_OMNI_MODEL || "gemini-omni-1.1-flash";
+
+async function gfetch(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
+  const key = googleKey();
+  if (!key) throw new ProviderError("Не задан ключ Google AI Studio (GEMINI_API_KEY)", 400);
+  const res = await withRetry(() => fetch(`${BASE}/${path}`, {
+    ...init,
+    headers: { "x-goog-api-key": key, "Content-Type": "application/json", ...(init.headers ?? {}) },
+    cache: "no-store",
+  })).catch((e) => { throw describeNetError(e, "Google Gemini"); });
+  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!res.ok) {
+    const msg = (json?.error as Record<string, unknown> | undefined)?.message;
+    throw new ProviderError(`Gemini ${res.status}: ${msg ?? res.statusText}`, res.status);
+  }
+  return json ?? {};
+}
+
+export async function omniSubmit(body: Record<string, unknown>): Promise<string> {
+  const d = await gfetch("interactions", { method: "POST", body: JSON.stringify({ model: OMNI_MODEL, ...body, background: true, store: true }) });
+  const id = String(d.id ?? "");
+  if (!id) throw new ProviderError("Gemini не вернул id задачи");
+  return id;
+}
+
+export type OmniStatus = {
+  status: "in_progress" | "completed" | "failed" | "canceled";
+  video?: { data?: string; uri?: string; mimeType: string };
+  error?: string;
+};
+
+export async function omniStatus(id: string): Promise<OmniStatus> {
+  const d = await gfetch(`interactions/${encodeURIComponent(id)}`);
+  const raw = String(d.status ?? "in_progress");
+  const errs = (d.errors as { message?: string }[] | undefined) ?? [];
+  const errText = errs.map((e) => e.message).filter(Boolean).join("; ");
+  if (raw === "in_progress") return { status: "in_progress" };
+  if (raw === "cancelled") return { status: "canceled", error: "Отменено" };
+  const steps = (d.steps as { type?: string; content?: Record<string, unknown>[] }[] | undefined) ?? [];
+  const outs = steps.filter((s) => s.type === "model_output").flatMap((s) => s.content ?? []);
+  const v = outs.find((c) => c.type === "video");
+  if (raw === "completed" && v) {
+    return { status: "completed", video: { data: typeof v.data === "string" ? v.data : undefined, uri: typeof v.uri === "string" ? v.uri : undefined, mimeType: String(v.mime_type ?? "video/mp4") } };
+  }
+  const said = outs.filter((c) => c.type === "text" && typeof c.text === "string").map((c) => c.text as string).join(" ").slice(0, 300);
+  return { status: "failed", error: errText || (said ? `Модель не сделала видео: «${said}»` : raw === "completed" ? "Модель не вернула видео" : `Генерация не удалась (${raw})`) };
+}
+
+export async function omniDownload(uri: string): Promise<Buffer> {
+  const key = googleKey();
+  const r = await fetch(uri, { headers: key ? { "x-goog-api-key": key } : {}, redirect: "follow", cache: "no-store" });
+  if (!r.ok) throw new ProviderError(`Не удалось скачать видео Gemini (${r.status})`);
+  return Buffer.from(await r.arrayBuffer());
+}
+
+export async function omniCancel(id: string): Promise<void> {
+  await gfetch(`interactions/${encodeURIComponent(id)}/cancel`, { method: "POST", body: "{}" });
+}
+
+export async function omniDelete(id: string): Promise<void> {
+  await gfetch(`interactions/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+}

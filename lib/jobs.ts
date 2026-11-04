@@ -1,17 +1,17 @@
 import "server-only";
 import { randomUUID } from "crypto";
 import {
-  GenRequest, Kind, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, resolveRequest, ARK_MODEL_IDS,
+  GenRequest, Kind, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, resolveRequest, buildOmniPlan, ARK_MODEL_IDS,
 } from "./models";
 import { describeNetError } from "./net";
 import { putFile, putJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, localKeyOf, StoredItem } from "./storage";
 import * as hf from "./providers/higgsfield";
-import { nanoBananaGenerate, fetchAsInline } from "./providers/google";
+import { nanoBananaGenerate, fetchAsInline, omniSubmit, omniStatus, omniDownload, omniCancel, omniDelete } from "./providers/google";
 import * as ark from "./providers/byteplus";
 import { withBase } from "./base";
 
 export type JobStatus = "queued" | "in_progress" | "completed" | "failed" | "nsfw" | "canceled";
-export type JobOutput = { url: string; type: "image" | "video" };
+export type JobOutput = { url: string; type: "image" | "video"; thumb?: string }; // thumb — лёгкая превью-картинка для сетки
 
 export type JobRecord = {
   id: string;
@@ -63,13 +63,66 @@ function extFrom(contentType: string | null, url: string, type: "image" | "video
 }
 
 // Копируем результат к себе: Higgsfield удаляет файлы через 7 дней
+// Превью для сетки галереи: webp до 800 px по большей стороне (оригинал остаётся для просмотра и скачивания)
+export async function makeThumb(id: string, index: number, buf: Buffer): Promise<string | undefined> {
+  try {
+    const sharp = (await import("sharp")).default;
+    const out = await sharp(buf, { failOn: "none" }).rotate()
+      .resize({ width: 800, height: 800, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 78 }).toBuffer();
+    if (out.length >= buf.length) return undefined; // превью не легче оригинала — не нужно
+    return await putFile(`out/${id}/${index}.thumb.webp`, out, "image/webp");
+  } catch (e) {
+    console.warn("thumb failed", (e as Error).message);
+    return undefined;
+  }
+}
+
 async function copyOutput(id: string, index: number, out: JobOutput): Promise<JobOutput> {
-  if (out.url.startsWith("/")) return out; // уже наш (мок)
+  if (out.url.startsWith("/") || out.url.includes(`/out/${id}/`)) return out; // уже в нашем хранилище
   const r = await fetch(out.url, { cache: "no-store" });
   if (!r.ok || !r.body) return out; // оставим исходную ссылку
   const ct = r.headers.get("content-type") || (out.type === "video" ? "video/mp4" : "image/png");
-  const url = await putFile(`out/${id}/${index}.${extFrom(ct, out.url, out.type)}`, r.body, ct);
+  const pathname = `out/${id}/${index}.${extFrom(ct, out.url, out.type)}`;
+  if (out.type === "image") {
+    const buf = Buffer.from(await r.arrayBuffer());
+    const url = await putFile(pathname, buf, ct);
+    return { ...out, url, thumb: await makeThumb(id, index, buf) };
+  }
+  const url = await putFile(pathname, r.body, ct);
   return { ...out, url };
+}
+
+// Догенерация превью для старых результатов (вызывается из галереи постепенно)
+export async function ensureThumbs(ids: string[], origin: string): Promise<JobRecord[]> {
+  const updated: JobRecord[] = [];
+  for (const id of ids.slice(0, 8)) {
+    if (!parseJobId(id)) continue;
+    const files = await findJobFiles(id);
+    if (!files.done) continue;
+    const rec = await readJSON<JobRecord>(files.done);
+    if (!rec || rec.status !== "completed") continue;
+    let changed = false;
+    const outputs: JobOutput[] = [];
+    for (let i = 0; i < rec.outputs.length; i++) {
+      const o = rec.outputs[i];
+      if (o.type !== "image" || o.thumb || /\.svg(\?|$)/i.test(o.url)) { outputs.push(o); continue; }
+      try {
+        const lk = localKeyOf(o.url);
+        const buf = lk ? await readLocalFile(lk) : Buffer.from(await (await fetch(toAbsolute(o.url, origin), { cache: "no-store" })).arrayBuffer());
+        const thumb = buf ? await makeThumb(id, i, buf) : undefined;
+        // «-» — превью не нужно (оригинал и так лёгкий), чтобы не пытаться снова
+        outputs.push({ ...o, thumb: thumb ?? "-" });
+        changed = true;
+      } catch { outputs.push(o); }
+    }
+    if (changed) {
+      const next = { ...rec, outputs };
+      await putJSON(donePath(id), next);
+      updated.push(next);
+    }
+  }
+  return updated;
 }
 
 async function loadInline(url: string, origin: string) {
@@ -78,7 +131,8 @@ async function loadInline(url: string, origin: string) {
     const buf = await readLocalFile(lk);
     if (!buf) throw new hf.ProviderError("Референс не найден", 400);
     const ext = url.split(".").pop()?.toLowerCase();
-    const mimeType = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png";
+    const mimeType = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp"
+      : ext === "mp4" ? "video/mp4" : ext === "mov" ? "video/quicktime" : ext === "webm" ? "video/webm" : "image/png";
     return { mimeType, data: buf.toString("base64") };
   }
   return fetchAsInline(toAbsolute(url, origin));
@@ -155,6 +209,22 @@ export async function createJob(asked: GenRequest, origin: string): Promise<JobR
     return rec;
   }
 
+  if (model.provider === "google" && model.kind === "video") {
+    const plan = buildOmniPlan(req);
+    const media = await Promise.all(plan.media.map(async (m) => ({ kind: m.kind, ...(await loadInline(m.url, origin)) })));
+    const body: Record<string, unknown> = {
+      input: media.length
+        ? [...media.map((m) => ({ type: m.kind, data: m.data, mime_type: m.mimeType })), ...(plan.text ? [{ type: "text", text: plan.text }] : [])]
+        : plan.text,
+      response_format: plan.responseFormat,
+    };
+    if (plan.task) body.generation_config = { video_config: { task: plan.task } };
+    const iid = await omniSubmit(body);
+    const rec: JobRecord = { ...base, providerRequestId: `omni:${iid}` };
+    await putJSON(pendingPath(id), rec);
+    return rec;
+  }
+
   if (model.provider === "google") {
     return runSync(base, async () => {
       const refs = await Promise.all((req.inputs.refs ?? []).filter(Boolean).map((u) => loadInline(u, origin)));
@@ -176,7 +246,7 @@ export async function createJob(asked: GenRequest, origin: string): Promise<JobR
       for (let i = 0; i < images.length; i++) {
         const img = images[i];
         const url = await putFile(`out/${id}/${i}.${extFrom(img.mimeType, "", "image")}`, img.data, img.mimeType);
-        outputs.push({ url, type: "image" });
+        outputs.push({ url, type: "image", thumb: await makeThumb(id, i, img.data) });
       }
       // Платим только за реально полученные картинки
       return { status: "completed", outputs, cost: Math.round((base.cost / count) * images.length * 10000) / 10000 };
@@ -262,6 +332,21 @@ export async function pollJob(id: string, providerRequestId: string): Promise<Pa
     const done = await finalize(id, { status: "failed", error: "Генерация прервалась — попробуйте ещё раз" });
     return done ?? { id, status: "failed", error: "Генерация прервалась" };
   }
+  if (providerRequestId.startsWith("omni:")) {
+    const iid = providerRequestId.slice(5);
+    const os = await omniStatus(iid);
+    if (os.status === "in_progress") return { id, status: "in_progress" };
+    if (os.status === "completed" && os.video) {
+      const buf = os.video.data ? Buffer.from(os.video.data, "base64") : await omniDownload(os.video.uri!);
+      const url = await putFile(`out/${id}/0.mp4`, buf, os.video.mimeType || "video/mp4");
+      const done = await finalize(id, { status: "completed", outputs: [{ url, type: "video" }] });
+      omniDelete(iid).catch(() => {});
+      return done ?? { id, status: "completed", outputs: [{ url, type: "video" }] };
+    }
+    const st3: JobStatus = os.status === "canceled" ? "canceled" : "failed";
+    const done = await finalize(id, { status: st3, outputs: [], error: os.error });
+    return done ?? { id, status: st3, error: os.error };
+  }
   if (providerRequestId.startsWith("ark:")) {
     const as = await ark.seedanceStatus(providerRequestId.slice(4));
     if (!TERMINAL.includes(as.status)) return { id, status: as.status };
@@ -292,7 +377,26 @@ export async function pollJob(id: string, providerRequestId: string): Promise<Pa
 export async function cancelJob(providerRequestId: string): Promise<void> {
   if (providerRequestId.startsWith("mock:") || providerRequestId.startsWith("sync:")) return;
   if (providerRequestId.startsWith("ark:")) { await ark.seedanceCancel(providerRequestId.slice(4)); return; }
+  if (providerRequestId.startsWith("omni:")) { await omniCancel(providerRequestId.slice(5)); return; }
   await hf.cancel(providerRequestId);
+}
+
+// Готовые задачи почти не меняются: кэшируем в памяти функции по пути и размеру файла
+// (правка записи меняет размер — тогда читаем заново)
+const doneCache = new Map<string, JobRecord>();
+async function readJobCached(item: StoredItem): Promise<JobRecord | null> {
+  const cacheable = item.pathname.endsWith(".d.json") && item.size !== undefined;
+  const key = `${item.pathname}:${item.size}`;
+  if (cacheable) {
+    const hit = doneCache.get(key);
+    if (hit) return hit;
+  }
+  const rec = await readJSON<JobRecord>(item);
+  if (rec && cacheable) {
+    if (doneCache.size > 5000) doneCache.delete(doneCache.keys().next().value!);
+    doneCache.set(key, rec);
+  }
+  return rec;
 }
 
 export async function listJobs(kind: Kind, cursor?: string): Promise<{ jobs: JobRecord[]; cursor?: string }> {
@@ -303,7 +407,7 @@ export async function listJobs(kind: Kind, cursor?: string): Promise<{ jobs: Job
     const prev = byBase.get(base);
     if (!prev || it.pathname.endsWith(".d.json")) byBase.set(base, it);
   }
-  const jobs = (await Promise.all([...byBase.values()].map((i) => readJSON<JobRecord>(i)))).filter(Boolean) as JobRecord[];
+  const jobs = (await Promise.all([...byBase.values()].map((i) => readJobCached(i)))).filter(Boolean) as JobRecord[];
   jobs.sort((a, b) => b.createdAt - a.createdAt);
   return { jobs, cursor: next };
 }
@@ -331,7 +435,7 @@ export async function removeOutputs(id: string, indexes?: number[]): Promise<"de
     return "deleted";
   }
   const { items } = await listItems(`out/${id}/`, 20);
-  const dropUrls = new Set(rec.outputs.filter((_, i) => drop.has(i)).map((o) => o.url));
+  const dropUrls = new Set(rec.outputs.filter((_, i) => drop.has(i)).flatMap((o) => [o.url, ...(o.thumb && o.thumb !== "-" ? [o.thumb] : [])]));
   await deleteItems(items.filter((it) => dropUrls.has(it.url)));
   await putJSON(donePath(id), { ...rec, outputs: rec.outputs.filter((_, i) => !drop.has(i)) });
   return "updated";

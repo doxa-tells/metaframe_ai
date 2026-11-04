@@ -3,7 +3,9 @@ import type { GenRequest, Kind } from "./models";
 import { withBase } from "./base";
 
 export type JobStatus = "queued" | "in_progress" | "completed" | "failed" | "nsfw" | "canceled";
-export type JobOutput = { url: string; type: "image" | "video" };
+export type JobOutput = { url: string; type: "image" | "video"; thumb?: string };
+// Лёгкая картинка для сетки (оригинал — для просмотра и скачивания)
+export const thumbOf = (o: JobOutput) => (o.thumb && o.thumb !== "-" ? o.thumb : o.url);
 export type Job = {
   id: string; kind: Kind; modelId: string; modeId: string; prompt: string;
   params: Record<string, unknown>; inputs: Record<string, string[]>; cost: number;
@@ -146,3 +148,11 @@ export function listPresetsApi(path: string): Promise<Preset[]> {
 export const getFavoritesApi = () => api<{ keys: string[] }>("/api/favorites").then((r) => r.keys);
 export const setFavoritesApi = (keys: string[], on: boolean) =>
   api<{ keys: string[] }>("/api/favorites", { method: "POST", body: JSON.stringify({ keys, on }) }).then((r) => r.keys);
+
+export const ensureThumbsApi = (ids: string[]) =>
+  api<{ jobs: Job[] }>("/api/jobs/thumbs", { method: "POST", body: JSON.stringify({ ids }) }).then((r) => r.jobs);
+
+// Кэш истории между переходами Фото ↔ Видео: показываем сразу, обновляем в фоне
+const jobsCache = new Map<Kind, { jobs: Job[]; cursor?: string }>();
+export const cachedJobs = (kind: Kind) => jobsCache.get(kind);
+export const rememberJobs = (kind: Kind, jobs: Job[], cursor?: string) => jobsCache.set(kind, { jobs, cursor });

@@ -61,7 +61,7 @@ export function signUpload(fileName: string): { uploadUrl: string; url: string }
 }
 const LOCAL_DIR = path.join(process.cwd(), ".data");
 
-export type StoredItem = { pathname: string; url: string };
+export type StoredItem = { pathname: string; url: string; size?: number };
 
 type Body = Buffer | string | ReadableStream<Uint8Array>;
 
@@ -117,13 +117,13 @@ export async function listItems(prefix: string, limit = 50, cursor?: string): Pr
   if (useWorker) {
     const q = new URLSearchParams({ prefix, limit: String(limit) });
     if (cursor) q.set("cursor", cursor);
-    const d = (await (await workerFetch(`${WORKER_URL}/list?${q}`)).json()) as { items: { key: string }[]; cursor: string | null };
-    return { items: d.items.map((i) => ({ pathname: i.key, url: workerUrl(i.key) })), cursor: d.cursor ?? undefined };
+    const d = (await (await workerFetch(`${WORKER_URL}/list?${q}`)).json()) as { items: { key: string; size?: number }[]; cursor: string | null };
+    return { items: d.items.map((i) => ({ pathname: i.key, url: workerUrl(i.key), size: i.size })), cursor: d.cursor ?? undefined };
   }
   if (useBlob) {
     const res = await list({ prefix, limit, cursor });
     return {
-      items: res.blobs.map((b) => ({ pathname: b.pathname, url: b.url })),
+      items: res.blobs.map((b) => ({ pathname: b.pathname, url: b.url, size: b.size })),
       cursor: res.hasMore ? res.cursor : undefined,
     };
   }

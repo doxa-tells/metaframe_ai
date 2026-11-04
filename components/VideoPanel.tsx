@@ -219,7 +219,7 @@ export function VideoPanel(p: Props) {
       <div className="vscroll">
         <PillPopover variant="card" className="hero-wrap" width={340} title="Сменить модель"
           label={
-            <div className="hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(0,0,0,.82) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%), url(${heroFor(p.model.id)})` }}>
+            <div className="hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(0,0,0,.82) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%), ${heroFor(p.model.id)}` }}>
               <img className="hero-emblem" src={emblemWhiteFor(p.model.id)} alt="" draggable={false} />
               <span className="hero-change"><Icon name="pencil" size={13} /> Сменить</span>
               <div className="hero-title">{p.mode.label.toUpperCase()}</div>
@@ -302,6 +302,7 @@ export function VideoPanel(p: Props) {
               : p.mode.id === "swap" ? "Что заменить и на что: «замени кружку в руке на [изображение 1]»…"
               : p.mode.id === "motion" ? "Необязательно: уточните, кто из картинок кого играет и где…"
               : p.mode.id === "restyle" ? "Необязательно: что добавить к выбранному стилю…"
+              : p.mode.id === "edit" ? "Что изменить в видео: «сделай ночь вместо дня, остальное оставь»…"
               : "Опишите сцену, действие, камеру и звук…"}
             onChange={(e) => p.onPrompt(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) p.onSubmit(); }} />

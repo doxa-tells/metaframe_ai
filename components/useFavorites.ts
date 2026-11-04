@@ -7,7 +7,8 @@ let favs = new Set<string>();
 let loaded = false;
 let loading: Promise<void> | null = null;
 const subs = new Set<() => void>();
-const emit = () => subs.forEach((f) => f());
+let rev = 0;
+const emit = () => { rev++; subs.forEach((f) => f()); };
 
 function load() {
   if (!loading) {
@@ -39,6 +40,7 @@ export function useFavorites() {
   }, []);
   return {
     ready: loaded,
+    rev,
     has: (k: string) => favs.has(k),
     size: favs.size,
     toggle: (k: string) => toggleFavorites([k], !favs.has(k)),

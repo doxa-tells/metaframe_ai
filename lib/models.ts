@@ -35,7 +35,7 @@ export type ModeSpec = {
   inputs: InputSpec[];
   params: ParamSpec[];
   hint?: string;
-  source?: { min: number; max: number }; // ограничения длины видео-исходника, с
+  source?: { min: number; max: number; strict?: boolean }; // ограничения длины видео-исходника, с (strict — длиннее нельзя)
   hidden?: boolean; // режим не показывается вкладкой (используется как запасной)
   textFallback?: string; // без референсов запрос уходит в этот режим (текст → видео)
   refToken?: (kind: MediaKind, n: number) => string; // как ссылаться на референс в промпте
@@ -319,7 +319,83 @@ const genjutsuLight: ModelSpec = {
   ],
 };
 
-export const MODELS: ModelSpec[] = [nanoBanana, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, kling, genjutsu, genjutsuLight];
+// ---------- Gemini Omni 1.1 Flash (Google, преемник Veo в Gemini API) ----------
+const OM_RES: ParamSpec = { key: "resolution", label: "Разрешение", type: "select", default: "720p",
+  options: [{ value: "360p", label: "360p (черновик)" }, { value: "720p", label: "720p" }, { value: "1080p", label: "1080p" }, { value: "4k", label: "4K" }] };
+const OM_DUR: ParamSpec = { key: "duration", label: "Длительность", type: "slider", min: 3, max: 10, step: 1, default: 8, unit: "с" };
+const OM_AR: ParamSpec = { key: "aspect_ratio", label: "Формат", type: "select", default: "16:9", options: opts("16:9", "9:16") };
+// Прайс Gemini API за секунду результата
+const OM_PRICE: Record<string, number> = { "360p": 0.03, "720p": 0.1, "1080p": 0.15, "4k": 0.3 };
+
+const omni: ModelSpec = {
+  id: "gemini-omni-flash",
+  name: "Gemini Omni Flash",
+  vendor: "Google",
+  kind: "video",
+  provider: "google",
+  description: "Новое поколение Veo: видео со звуком 3–10 с, кадры, референсы и правка видео словами",
+  badge: "NEW",
+  priceNote: "Gemini API: $0.03/с 360p, $0.10/с 720p, $0.15/с 1080p, $0.30/с 4K. Длительность модель выбирает сама (3–10 с), ориентир — в настройках",
+  price: (m, p) => (OM_PRICE[String(p.resolution)] ?? 0.1) * (m === "edit" ? srcSeconds(p, 10) : Number(p.duration ?? 8)),
+  modes: [
+    {
+      id: "reference", label: "Промпт и референсы", promptRequired: true, textFallback: "text",
+      inputs: [
+        { key: "image_urls", label: "Изображения", kind: "image", max: 3 },
+        { key: "video_urls", label: "Видео (до 3 с)", kind: "video", max: 3 },
+      ],
+      params: [OM_DUR, OM_RES, OM_AR],
+      refToken: (k, n) => `<${k === "video" ? "VIDEO" : "IMAGE"}_REF_${n - 1}>`,
+      hint: "Референсы необязательны. Ссылки: <IMAGE_REF_0>, <VIDEO_REF_0> (нумерация с нуля). Звук модель делает сама — опишите его в промпте",
+    },
+    {
+      id: "image", label: "Кадры → видео", promptRequired: false,
+      inputs: [
+        { key: "image_url", label: "Первый кадр", kind: "image", max: 1, single: true, required: true },
+        { key: "end_image_url", label: "Последний кадр", kind: "image", max: 1, single: true },
+      ],
+      params: [OM_DUR, OM_RES],
+      hint: "Формат берётся из кадра. С двумя кадрами — плавный переход от первого к последнему",
+    },
+    {
+      id: "edit", label: "Правка видео", promptRequired: true, source: { min: 1, max: 10, strict: true },
+      inputs: [{ key: "video_url", label: "Видео (до 10 с)", kind: "video", max: 1, single: true, required: true }],
+      params: [OM_RES],
+      hint: "Опишите, что изменить: «сделай свет драматичнее, остальное оставь как есть». Видео до 10 с",
+    },
+    { id: "text", label: "Текст → видео", hidden: true, promptRequired: true, inputs: [], params: [OM_DUR, OM_RES, OM_AR] },
+  ],
+};
+
+// План запроса к Interactions API: какие медиа отправить (по порядку), текст и настройки ответа
+export function buildOmniPlan(req: GenRequest): {
+  media: { url: string; kind: "image" | "video" }[]; text: string; responseFormat: Record<string, string>; task?: string;
+} {
+  const p = req.params ?? {};
+  const inp = req.inputs ?? {};
+  const list = (k: string) => (inp[k] ?? []).filter(Boolean);
+  const media: { url: string; kind: "image" | "video" }[] = [];
+  let task: string | undefined;
+  const responseFormat: Record<string, string> = { type: "video", resolution: String(p.resolution ?? "720p") };
+  if (req.modeId === "image") {
+    for (const u of [...list("image_url").slice(0, 1), ...list("end_image_url").slice(0, 1)]) media.push({ url: u, kind: "image" });
+    task = "image_to_video";
+  } else if (req.modeId === "edit") {
+    for (const u of list("video_url").slice(0, 1)) media.push({ url: u, kind: "video" });
+    task = "edit";
+  } else {
+    for (const u of list("image_urls")) media.push({ url: u, kind: "image" });
+    for (const u of list("video_urls")) media.push({ url: u, kind: "video" });
+    if (media.length) task = "reference_to_video";
+    responseFormat.aspect_ratio = String(p.aspect_ratio ?? "16:9");
+  }
+  let text = (req.prompt ?? "").trim();
+  // У API нет параметра длительности — подсказываем её в промпте
+  if (req.modeId !== "edit" && p.duration) text = `${text}${text ? "\n\n" : ""}Video length: about ${Number(p.duration)} seconds.`;
+  return { media, text, responseFormat, task };
+}
+
+export const MODELS: ModelSpec[] = [nanoBanana, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, kling, omni, genjutsu, genjutsuLight];
 
 export function getModel(id: string): ModelSpec | undefined {
   return MODELS.find((m) => m.id === id);
@@ -392,6 +468,7 @@ export function validateRequest(req: GenRequest): string | null {
   if (mode.source) {
     const d = Number(req.params?.[SRC_DURATION]);
     if (Number.isFinite(d) && d > 0 && d < mode.source.min - 0.05) return `Исходное видео должно быть не короче ${mode.source.min} с`;
+    if (mode.source.strict && Number.isFinite(d) && d > mode.source.max + 0.05) return `Исходное видео должно быть не длиннее ${mode.source.max} с`;
   }
   for (const p of mode.params) {
     const v = req.params?.[p.key];

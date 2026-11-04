@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MODELS, defaultParams, estimateCost, firstMode, formatUsd, getModel, validateRequest, visibleMode, type Kind } from "@/lib/models";
-import { bulkDelete, cancelJob, deleteJob, generate, isTerminal, listJobs, waitForJob, type Job } from "@/lib/client";
+import { bulkDelete, cachedJobs, cancelJob, deleteJob, generate, isTerminal, listJobs, rememberJobs, waitForJob, type Job } from "@/lib/client";
 import { useApp } from "./AppContext";
 import { Gallery, type BulkItem } from "./Gallery";
 import { notifySpent } from "./BalanceBar";
@@ -30,9 +30,10 @@ export function Studio({ kind }: { kind: Kind }) {
   const router = useRouter();
   const storeKey = `studio.${kind}.v1`;
   const [form, setForm] = useState<FormState>(() => initialForm(kind));
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [loading, setLoading] = useState(true);
+  // История из кэша показывается сразу при возврате на страницу, а свежая подгружается в фоне
+  const [jobs, setJobs] = useState<Job[]>(() => cachedJobs(kind)?.jobs ?? []);
+  const [cursor, setCursor] = useState<string | undefined>(() => cachedJobs(kind)?.cursor);
+  const [loading, setLoading] = useState(() => !cachedJobs(kind));
   const [error, setError] = useState<string | null>(null);
   const loaded = useRef(false);
   const polling = useRef(new Set<string>());
@@ -79,7 +80,7 @@ export function Studio({ kind }: { kind: Kind }) {
 
   // История
   const load = useCallback(async (c?: string) => {
-    setLoading(true);
+    if (c || !cachedJobs(kind)) setLoading(true);
     try {
       const r = await listJobs(kind, c);
       setJobs((prev) => {
@@ -96,6 +97,11 @@ export function Studio({ kind }: { kind: Kind }) {
       setLoading(false);
     }
   }, [kind]);
+  useEffect(() => { rememberJobs(kind, jobs, cursor); }, [kind, jobs, cursor]);
+  const mergeJobs = useCallback((upd: Job[]) => {
+    const map = new Map(upd.map((j) => [j.id, j]));
+    setJobs((prev) => prev.map((j) => map.get(j.id) ?? j));
+  }, []);
   useEffect(() => {
     alive.current = { cancelled: false };
     load();
@@ -221,6 +227,7 @@ export function Studio({ kind }: { kind: Kind }) {
       hasMore={Boolean(cursor)}
       onLoadMore={() => load(cursor)}
       onReuse={reuse}
+      onJobsUpdated={mergeJobs}
       onUseAsInput={kind === "image" ? useAsInput : undefined}
       onAnimate={kind === "image" ? animate : undefined}
       onDelete={remove}

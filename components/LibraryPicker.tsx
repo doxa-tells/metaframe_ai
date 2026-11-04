@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { listJobs, type Job } from "@/lib/client";
+import { listJobs, thumbOf, type Job } from "@/lib/client";
 import { getModel } from "@/lib/models";
 import { Icon } from "./Icon";
 import { favKey, useFavorites } from "./useFavorites";
@@ -85,7 +85,7 @@ export function LibraryPicker({ kinds, max, onClose, onPick }: {
                 title={`${getModel(job.modelId)?.name ?? ""}${job.prompt ? " · " + job.prompt.slice(0, 120) : ""}`}>
                 {o.type === "video"
                   ? <video src={o.url} muted loop playsInline preload="metadata" onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} />
-                  : <img src={o.url} alt="" loading="lazy" draggable={false} />}
+                  : <img src={thumbOf(o)} alt="" loading="lazy" decoding="async" draggable={false} />}
                 {o.type === "video" && <span className="lib-play"><Icon name="play" size={14} /></span>}
                 {fav.has(favKey(job.id, i)) && <span className="lib-fav"><Icon name="star" size={12} className="fav-on" /></span>}
                 {n >= 0 && <span className="lib-n">{n + 1}</span>}
