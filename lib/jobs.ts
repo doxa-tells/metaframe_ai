@@ -101,6 +101,23 @@ function mockSvg(prompt: string, seed: number, aspect = "3:4"): string {
 <rect width="${W}" height="${H}" fill="url(#g)"/><text x="40" y="${H - 44}" fill="white" font-family="sans-serif" font-size="28" opacity=".85">MOCK · ${safe}</text></svg>`;
 }
 
+// Синхронные генерации (Nano Banana, Seedream): сразу пишем запись «в процессе»,
+// чтобы карточка не пропадала при перезагрузке страницы или переходе между разделами
+const SYNC_TIMEOUT_MS = 330_000;
+async function runSync(base: JobRecord, work: () => Promise<Partial<JobRecord>>): Promise<JobRecord> {
+  await putJSON(pendingPath(base.id), { ...base, status: "in_progress", providerRequestId: `sync:${base.createdAt}` });
+  let rec: JobRecord;
+  try {
+    rec = { ...base, ...(await work()), finishedAt: Date.now() };
+  } catch (e) {
+    rec = { ...base, status: "failed", cost: 0, error: (e as Error).message, finishedAt: Date.now() };
+  }
+  await putJSON(donePath(base.id), rec);
+  const files = await findJobFiles(base.id).catch(() => null);
+  if (files?.pending) await deleteItems([files.pending]).catch(() => {});
+  return rec;
+}
+
 export async function createJob(req: GenRequest, origin: string): Promise<JobRecord> {
   const err = validateRequest(req);
   if (err) throw new hf.ProviderError(err, 400);
@@ -116,15 +133,16 @@ export async function createJob(req: GenRequest, origin: string): Promise<JobRec
 
   if (MOCK) {
     if (model.kind === "image") {
-      const n = Number(req.params.count ?? req.params.batch_size ?? 1) || 1;
-      const outputs: JobOutput[] = [];
-      for (let i = 0; i < n; i++) {
-        const url = await putFile(`out/${id}/${i}.svg`, mockSvg(base.prompt, Date.now() + i * 47, String(req.params.aspect_ratio ?? "3:4")), "image/svg+xml");
-        outputs.push({ url, type: "image" });
-      }
-      const rec = { ...base, status: "completed" as const, outputs, finishedAt: Date.now() };
-      await putJSON(donePath(id), rec);
-      return rec;
+      return runSync(base, async () => {
+        await new Promise((r) => setTimeout(r, 4000)); // имитация времени генерации
+        const n = Number(req.params.count ?? req.params.batch_size ?? 1) || 1;
+        const outputs: JobOutput[] = [];
+        for (let i = 0; i < n; i++) {
+          const url = await putFile(`out/${id}/${i}.svg`, mockSvg(base.prompt, Date.now() + i * 47, String(req.params.aspect_ratio ?? "3:4")), "image/svg+xml");
+          outputs.push({ url, type: "image" });
+        }
+        return { status: "completed", outputs };
+      });
     }
     const rec = { ...base, providerRequestId: `mock:${Date.now()}` };
     await putJSON(pendingPath(id), rec);
@@ -132,7 +150,7 @@ export async function createJob(req: GenRequest, origin: string): Promise<JobRec
   }
 
   if (model.provider === "google") {
-    try {
+    return runSync(base, async () => {
       const refs = await Promise.all((req.inputs.refs ?? []).filter(Boolean).map((u) => loadInline(u, origin)));
       const count = Math.min(4, Math.max(1, Number(req.params.count ?? 1)));
       const results = await Promise.allSettled(
@@ -155,15 +173,8 @@ export async function createJob(req: GenRequest, origin: string): Promise<JobRec
         outputs.push({ url, type: "image" });
       }
       // Платим только за реально полученные картинки
-      const perImage = base.cost / count;
-      const rec: JobRecord = { ...base, status: "completed", outputs, cost: Math.round(perImage * images.length * 10000) / 10000, finishedAt: Date.now() };
-      await putJSON(donePath(id), rec);
-      return rec;
-    } catch (e) {
-      const rec: JobRecord = { ...base, status: "failed", cost: 0, error: (e as Error).message, finishedAt: Date.now() };
-      await putJSON(donePath(id), rec);
-      return rec;
-    }
+      return { status: "completed", outputs, cost: Math.round((base.cost / count) * images.length * 10000) / 10000 };
+    });
   }
 
   if (model.provider === "byteplus") {
@@ -176,7 +187,7 @@ export async function createJob(req: GenRequest, origin: string): Promise<JobRec
       await putJSON(pendingPath(id), rec);
       return rec;
     }
-    try {
+    return runSync(base, async () => {
       const count = Math.min(4, Math.max(1, Number(req.params.count ?? 1)));
       const body = buildArkImageBody(req, arkModel, conv.refs ?? []);
       const results = await Promise.allSettled(Array.from({ length: count }, () => ark.seedreamGenerate(body)));
@@ -187,14 +198,8 @@ export async function createJob(req: GenRequest, origin: string): Promise<JobRec
       }
       const outputs: JobOutput[] = [];
       for (let i = 0; i < urls.length; i++) outputs.push(await copyOutput(id, i, { url: urls[i], type: "image" }));
-      const rec: JobRecord = { ...base, status: "completed", outputs, cost: Math.round((base.cost / count) * urls.length * 10000) / 10000, finishedAt: Date.now() };
-      await putJSON(donePath(id), rec);
-      return rec;
-    } catch (e) {
-      const rec: JobRecord = { ...base, status: "failed", cost: 0, error: (e as Error).message, finishedAt: Date.now() };
-      await putJSON(donePath(id), rec);
-      return rec;
-    }
+      return { status: "completed", outputs, cost: Math.round((base.cost / count) * urls.length * 10000) / 10000 };
+    });
   }
 
   // Higgsfield: асинхронно, сохраняем задачу и отдаём клиенту для опроса
@@ -241,6 +246,16 @@ export async function pollJob(id: string, providerRequestId: string): Promise<Pa
     const done = await finalize(id, { status: "completed", outputs: [{ url: "/mock.mp4", type: "video" }] });
     return done ?? { id, status: "failed", error: "Задача не найдена" };
   }
+  if (providerRequestId.startsWith("sync:")) {
+    const files = await findJobFiles(id);
+    if (files.done) {
+      const d = await readJSON<JobRecord>(files.done);
+      if (d) return d;
+    }
+    if (Date.now() - Number(providerRequestId.slice(5)) < SYNC_TIMEOUT_MS) return { id, status: "in_progress" };
+    const done = await finalize(id, { status: "failed", error: "Генерация прервалась — попробуйте ещё раз" });
+    return done ?? { id, status: "failed", error: "Генерация прервалась" };
+  }
   if (providerRequestId.startsWith("ark:")) {
     const as = await ark.seedanceStatus(providerRequestId.slice(4));
     if (!TERMINAL.includes(as.status)) return { id, status: as.status };
@@ -269,7 +284,7 @@ export async function pollJob(id: string, providerRequestId: string): Promise<Pa
 }
 
 export async function cancelJob(providerRequestId: string): Promise<void> {
-  if (providerRequestId.startsWith("mock:")) return;
+  if (providerRequestId.startsWith("mock:") || providerRequestId.startsWith("sync:")) return;
   if (providerRequestId.startsWith("ark:")) { await ark.seedanceCancel(providerRequestId.slice(4)); return; }
   await hf.cancel(providerRequestId);
 }
