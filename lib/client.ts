@@ -43,6 +43,8 @@ export const pollJob = (job: Job) =>
   }).then((r) => r.job);
 export const cancelJob = (job: Job) => api("/api/jobs/cancel", { method: "POST", body: JSON.stringify({ providerRequestId: job.providerRequestId }) });
 export const deleteJob = (id: string) => api(`/api/jobs/${id}`, { method: "DELETE" });
+export const bulkDelete = (items: { id: string; indexes?: number[] }[]) =>
+  api<{ results: Record<string, string> }>("/api/jobs/bulk-delete", { method: "POST", body: JSON.stringify({ items }) }).then((r) => r.results);
 
 export type SoulId = { id: string; name: string; status: string; thumbnail?: string };
 export const listSoulIds = () => api<{ items: SoulId[] }>("/api/soul-ids").then((r) => r.items);

@@ -1,8 +1,9 @@
 import "server-only";
 import { ProviderError } from "./higgsfield";
+import { describeNetError, isNetworkError, withRetry } from "../net";
 
 // Gemini API: Nano Banana 2.1 (generateContent) и текстовая модель для чата.
-const BASE = "https://generativelanguage.googleapis.com/v1beta";
+const BASE = (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
 export const NANO_MODEL = process.env.NANO_BANANA_MODEL || "gemini-nano-banana-2.1";
 export const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-flash-latest";
 
@@ -11,7 +12,7 @@ export function googleKey(): string | null {
 }
 
 export async function fetchAsInline(url: string): Promise<{ mimeType: string; data: string }> {
-  const r = await fetch(url, { cache: "no-store" });
+  const r = await withRetry(() => fetch(url, { cache: "no-store" })).catch((e) => { throw describeNetError(e, "хранилищем (референс)"); });
   if (!r.ok) throw new ProviderError(`Не удалось загрузить референс (${r.status})`, 400);
   const mimeType = (r.headers.get("content-type") || "image/png").split(";")[0];
   const buf = Buffer.from(await r.arrayBuffer());
@@ -26,7 +27,15 @@ export type NanoParams = {
   thinking?: string;
 };
 
+// Один повтор при обрыве связи или ответе без картинки (Gemini иногда отвечает только текстом)
 export async function nanoBananaGenerate(p: NanoParams): Promise<{ data: Buffer; mimeType: string }[]> {
+  return withRetry(() => nanoBananaOnce(p), {
+    tries: 2, baseDelay: 1500,
+    retryIf: (e) => isNetworkError(e) || (e as { noImage?: boolean }).noImage === true,
+  }).catch((e) => { throw describeNetError(e, "Google Gemini"); });
+}
+
+async function nanoBananaOnce(p: NanoParams): Promise<{ data: Buffer; mimeType: string }[]> {
   const key = googleKey();
   if (!key) throw new ProviderError("Не задан ключ Google AI Studio (GEMINI_API_KEY)", 400);
   const parts: Record<string, unknown>[] = [];
@@ -58,9 +67,13 @@ export async function nanoBananaGenerate(p: NanoParams): Promise<{ data: Buffer;
     }
   }
   if (!out.length) {
-    const reason = (candidates[0]?.finishReason as string) ||
-      ((json?.promptFeedback as Record<string, unknown> | undefined)?.blockReason as string) || "нет изображения в ответе";
-    throw new ProviderError(`Gemini не вернул изображение: ${reason}`, 422);
+    const finish = candidates[0]?.finishReason as string | undefined;
+    const block = (json?.promptFeedback as Record<string, unknown> | undefined)?.blockReason as string | undefined;
+    // Что модель написала вместо картинки — чтобы было понятно, почему
+    const said = candidates.flatMap((c) => ((c.content as Record<string, unknown> | undefined)?.parts ?? []) as Record<string, unknown>[])
+      .filter((x) => typeof x.text === "string" && !x.thought).map((x) => String(x.text)).join(" ").trim().slice(0, 220);
+    const reason = block ? `заблокировано (${block})` : finish && finish !== "STOP" ? finish : said ? `модель ответила текстом: «${said}»` : "пустой ответ";
+    throw Object.assign(new ProviderError(`Gemini не вернул изображение — ${reason}`, 422), { noImage: !block });
   }
   return out;
 }

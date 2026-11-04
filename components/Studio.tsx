@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MODELS, defaultParams, estimateCost, formatUsd, getMode, getModel, validateRequest, type Kind } from "@/lib/models";
-import { cancelJob, deleteJob, generate, isTerminal, listJobs, waitForJob, type Job } from "@/lib/client";
+import { bulkDelete, cancelJob, deleteJob, generate, isTerminal, listJobs, waitForJob, type Job } from "@/lib/client";
 import { useApp } from "./AppContext";
-import { Gallery } from "./Gallery";
+import { Gallery, type BulkItem } from "./Gallery";
 import { Composer } from "./Composer";
 import { VideoPanel } from "./VideoPanel";
 import { Icon } from "./Icon";
@@ -169,6 +169,25 @@ export function Studio({ kind }: { kind: Kind }) {
     setJobs((prev) => prev.filter((j) => j.id !== job.id));
     try { await deleteJob(job.id); } catch (e) { setError((e as Error).message); }
   }
+  // Пакетное удаление: сразу убираем из списка, при ошибке — перезагружаем историю
+  async function removeMany(items: BulkItem[]) {
+    const map = new Map(items.map((i) => [i.id, i]));
+    setJobs((prev) => prev.flatMap((j) => {
+      const it = map.get(j.id);
+      if (!it) return [j];
+      if (!it.indexes) return [];
+      const outputs = j.outputs.filter((_, i) => !it.indexes!.includes(i));
+      return outputs.length ? [{ ...j, outputs }] : [];
+    }));
+    try {
+      const res = await bulkDelete(items);
+      const failed = Object.values(res).filter((r) => r.startsWith("error")).length;
+      if (failed) { setError(`Не удалось удалить ${failed} из ${items.length}`); load(); }
+    } catch (e) {
+      setError((e as Error).message);
+      load();
+    }
+  }
   function animate(url: string) {
     try { localStorage.setItem("handoff.animate", url); } catch { /* ignore */ }
     router.push("/video");
@@ -190,7 +209,10 @@ export function Studio({ kind }: { kind: Kind }) {
   const gallery = (
     <Gallery
       jobs={jobs}
-      layout={kind === "image" ? "justified" : "grouped"}
+      viewKey={`gallery.view.${kind}`}
+      defaultView={kind === "image"
+        ? { layout: "masonry", split: false, masonrySize: 260, squareSize: 200 }
+        : { layout: "square", split: true, masonrySize: 220, squareSize: 160 }}
       loading={loading}
       hasMore={Boolean(cursor)}
       onLoadMore={() => load(cursor)}
@@ -198,6 +220,7 @@ export function Studio({ kind }: { kind: Kind }) {
       onUseAsInput={kind === "image" ? useAsInput : undefined}
       onAnimate={kind === "image" ? animate : undefined}
       onDelete={remove}
+      onBulkDelete={removeMany}
       onCancel={cancel}
       emptyText={kind === "image" ? "Здесь появятся ваши изображения" : "Здесь появятся ваши видео"}
     />

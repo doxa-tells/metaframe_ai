@@ -1,4 +1,5 @@
 import "server-only";
+import { describeNetError, isNetworkError, withRetry } from "./net";
 import { promises as fs } from "fs";
 import path from "path";
 import { createHmac, randomUUID } from "crypto";
@@ -19,7 +20,20 @@ const workerUrl = (key: string) => `${WORKER_URL}/f/${encKey(key)}`;
 const auth = () => ({ Authorization: `Bearer ${WORKER_SECRET}` });
 
 async function workerFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  const res = await fetch(input, { ...init, cache: "no-store", headers: { ...auth(), ...(init.headers ?? {}) } });
+  // Поток можно отправить только один раз — его не повторяем
+  const canRetry = !(init.body && typeof init.body === "object" && "getReader" in (init.body as object));
+  let res: Response;
+  try {
+    res = await withRetry(async () => {
+      const r = await fetch(input, { ...init, cache: "no-store", headers: { ...auth(), ...(init.headers ?? {}) } });
+      if (r.status >= 500 && canRetry) throw Object.assign(new Error(`R2 ${r.status}`), { retryable: true, res: r });
+      return r;
+    }, { tries: canRetry ? 3 : 1, retryIf: (e) => isNetworkError(e) || Boolean((e as { retryable?: boolean }).retryable) });
+  } catch (e) {
+    const r5 = (e as { res?: Response }).res;
+    if (!r5) throw describeNetError(e, "хранилищем R2");
+    res = r5;
+  }
   if (!res.ok) {
     const text = (await res.text()).trim();
     const detail = text.startsWith("<") ? "" : ` ${text.slice(0, 160)}`;

@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import {
   GenRequest, Kind, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, ARK_MODEL_IDS,
 } from "./models";
+import { describeNetError } from "./net";
 import { putFile, putJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, StoredItem } from "./storage";
 import * as hf from "./providers/higgsfield";
 import { nanoBananaGenerate, fetchAsInline } from "./providers/google";
@@ -110,7 +111,8 @@ async function runSync(base: JobRecord, work: () => Promise<Partial<JobRecord>>)
   try {
     rec = { ...base, ...(await work()), finishedAt: Date.now() };
   } catch (e) {
-    rec = { ...base, status: "failed", cost: 0, error: (e as Error).message, finishedAt: Date.now() };
+    const where = base.provider === "google" ? "Google Gemini" : base.provider === "byteplus" ? "BytePlus" : "провайдером";
+    rec = { ...base, status: "failed", cost: 0, error: describeNetError(e, where).message, finishedAt: Date.now() };
   }
   await putJSON(donePath(base.id), rec);
   const files = await findJobFiles(base.id).catch(() => null);
@@ -307,4 +309,26 @@ export async function deleteJob(id: string): Promise<void> {
   const a = await listItems(jobPrefix(id), 10);
   const b = await listItems(`out/${id}/`, 20);
   await deleteItems([...a.items, ...b.items]);
+}
+
+// Удаление части результатов задачи (если удаляются все — удаляется задача целиком)
+export async function removeOutputs(id: string, indexes?: number[]): Promise<"deleted" | "updated" | "skipped"> {
+  if (!parseJobId(id)) throw new hf.ProviderError("Некорректный id", 400);
+  const files = await findJobFiles(id);
+  if (!files.done) {
+    if (files.pending) return "skipped"; // ещё генерируется
+    await deleteJob(id);
+    return "deleted";
+  }
+  const rec = await readJSON<JobRecord>(files.done);
+  const drop = new Set(indexes ?? []);
+  if (!rec || !indexes || !rec.outputs.length || rec.outputs.every((_, i) => drop.has(i))) {
+    await deleteJob(id);
+    return "deleted";
+  }
+  const { items } = await listItems(`out/${id}/`, 20);
+  const dropUrls = new Set(rec.outputs.filter((_, i) => drop.has(i)).map((o) => o.url));
+  await deleteItems(items.filter((it) => dropUrls.has(it.url)));
+  await putJSON(donePath(id), { ...rec, outputs: rec.outputs.filter((_, i) => !drop.has(i)) });
+  return "updated";
 }
