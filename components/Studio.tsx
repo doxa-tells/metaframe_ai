@@ -209,10 +209,10 @@ export function Studio({ kind }: { kind: Kind }) {
   const gallery = (
     <Gallery
       jobs={jobs}
-      viewKey={`gallery.view.${kind}`}
+      viewKey={`gallery.view.v2.${kind}`}
       defaultView={kind === "image"
-        ? { layout: "masonry", split: false, masonrySize: 260, squareSize: 200 }
-        : { layout: "square", split: true, masonrySize: 220, squareSize: 160 }}
+        ? { layout: "masonry", split: false, size: 0 }
+        : { layout: "square", split: true, size: 0 }}
       loading={loading}
       hasMore={Boolean(cursor)}
       onLoadMore={() => load(cursor)}

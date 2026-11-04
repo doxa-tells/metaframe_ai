@@ -9,7 +9,7 @@ import { PillPopover } from "./Popover";
 import { MediaThumb } from "./MediaInput";
 import { withBase } from "@/lib/base";
 
-export type GalleryView = { layout: "masonry" | "square"; split: boolean; masonrySize: number; squareSize: number };
+export type GalleryView = { layout: "masonry" | "square"; split: boolean; size: number }; // size: 0 — мельче всего … 3 — крупнее всего
 export type BulkItem = { id: string; indexes?: number[] };
 
 type Props = {
@@ -31,7 +31,9 @@ type Props = {
 type Card = { job: Job; index: number; out: JobOutput | null };
 const cardKey = (c: { job: Job; index: number }) => `${c.job.id}:${c.index}`;
 
-const SIZE = { masonry: { min: 140, max: 480 }, square: { min: 110, max: 360 } } as const;
+// Четыре понятных размера карточек (высота ряда в мозаике / ширина колонки в квадратах)
+const SIZES = { masonry: [150, 210, 290, 400], square: [120, 170, 240, 330] } as const;
+const SIZE_LABELS = ["Мелко", "Средне", "Крупно", "Макс."];
 
 function Elapsed({ from }: { from: number }) {
   const [, tick] = useState(0);
@@ -236,7 +238,8 @@ export function Gallery(p: Props) {
   };
 
   const masonry = view.layout === "masonry";
-  const rowH = view.masonrySize;
+  const sizeIdx = Math.min(3, Math.max(0, Math.round(Number(view.size) || 0)));
+  const rowH = SIZES.masonry[sizeIdx];
 
   function checkbox(c: Card) {
     const on = sel.has(cardKey(c));
@@ -341,7 +344,7 @@ export function Gallery(p: Props) {
         <div className="jfill" />
       </div>
     ) : (
-      <div className="sq-grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${view.squareSize}px, 1fr))` }}>{items.map(tile)}</div>
+      <div className="sq-grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${SIZES.square[sizeIdx]}px, 1fr))` }}>{items.map(tile)}</div>
     );
   }
 
@@ -364,8 +367,6 @@ export function Gallery(p: Props) {
     ));
   }
 
-  const sizeKey = masonry ? "masonrySize" : "squareSize";
-  const range = SIZE[view.layout];
 
   return (
     <div className={`gallery ${selecting ? "selecting" : ""} ${masonry ? "is-masonry" : "is-square"}`}>
@@ -409,9 +410,14 @@ export function Gallery(p: Props) {
                     <button type="button" className={`toggle ${view.split ? "on" : ""}`} onClick={() => setView({ split: !view.split })} aria-label="Разбить по датам"><span /></button>
                   </div>
                   <div className="pop-title">Размер карточек</div>
-                  <input type="range" className="pop-range" min={range.min} max={range.max} step={10} value={view[sizeKey]}
-                    onChange={(e) => setView({ [sizeKey]: Number(e.target.value) } as Partial<GalleryView>)} />
-                  <div className="row between muted tiny-text"><span>Мельче</span><span>Крупнее</span></div>
+                  <div className="size-seg">
+                    {SIZE_LABELS.map((label, i) => (
+                      <button key={label} type="button" className={i === sizeIdx ? "on" : ""} onClick={() => setView({ size: i })} title={label}>
+                        <span className="size-glyph" style={{ ["--n" as string]: 4 - i }}>{Array.from({ length: (4 - i) * (4 - i) }, (_, k) => <i key={k} />)}</span>
+                        <small>{label}</small>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </PillPopover>

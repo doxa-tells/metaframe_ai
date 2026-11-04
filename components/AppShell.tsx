@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AppProvider, useApp } from "./AppContext";
 import { ChatPanel } from "./ChatPanel";
 import { asset } from "@/lib/brand";
@@ -19,6 +19,14 @@ function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   const { chatOpen, setChatOpen, config } = useApp();
+  const [menu, setMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent) => { if (!menuRef.current?.contains(e.target as Node)) setMenu(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [menu]);
   const missing = config && !config.mock
     ? [!config.providers.google && "GEMINI_API_KEY", !config.providers.byteplus && "ARK_API_KEY", !config.providers.higgsfield && "HF_API_KEY"].filter(Boolean)
     : [];
@@ -45,10 +53,23 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <div className={`shell ${chatOpen ? "chat-open" : ""}`}>
       <header className="topbar">
-        <Link href="/image" className="tb-brand" title="MetaFrame AI">
-          <img src={asset("logo-chrome")} alt="" draggable={false} />
-          <span>MetaFrame</span>
-        </Link>
+        <div className="tb-brand-wrap" ref={menuRef}>
+          <button type="button" className={`tb-brand ${menu ? "open" : ""}`} onClick={() => setMenu(!menu)} title="Меню" aria-expanded={menu}>
+            <img src={asset("logo-chrome")} alt="" draggable={false} />
+            <span>MetaFrame</span>
+          </button>
+          {menu && (
+            <div className="tb-menu">
+              <div className="tb-menu-keys">
+                <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> разделы</div>
+                <div><kbd>C</kbd> чат · <kbd>Esc</kbd> закрыть</div>
+              </div>
+              <button type="button" className="tb-menu-item danger" onClick={logout}>
+                <NavIcon name="icon-logout" /> Выйти
+              </button>
+            </div>
+          )}
+        </div>
         <nav className="tb-nav" aria-label="Разделы">
           {NAV.map((n) => (
             <Link key={n.href} href={n.href} className={`tb-tab ${path?.startsWith(n.href) ? "active" : ""}`} title={`${n.label} (${n.key})`}>
@@ -61,9 +82,6 @@ function Shell({ children }: { children: ReactNode }) {
           <button className={`tb-btn ${chatOpen ? "active" : ""}`} onClick={() => setChatOpen(!chatOpen)} title="Чат (C)">
             <NavIcon name="icon-chat" />
             <span>Чат</span>
-          </button>
-          <button className="tb-btn icon" onClick={logout} title="Выйти" aria-label="Выйти">
-            <NavIcon name="icon-logout" />
           </button>
         </div>
       </header>
