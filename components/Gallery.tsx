@@ -7,6 +7,7 @@ import { useApp } from "./AppContext";
 import { Icon } from "./Icon";
 import { PillPopover } from "./Popover";
 import { MediaThumb } from "./MediaInput";
+import { withBase } from "@/lib/base";
 
 export type GalleryView = { layout: "masonry" | "square"; split: boolean; masonrySize: number; squareSize: number };
 export type BulkItem = { id: string; indexes?: number[] };
@@ -420,7 +421,7 @@ export function Gallery(p: Props) {
 
       {!p.loading && p.jobs.length === 0 && (
         <div className="empty">
-          <img src="/assets/empty.webp" alt="" draggable={false} />
+          <img src={withBase("/assets/empty.webp")} alt="" draggable={false} />
           <div>{p.emptyText}</div>
         </div>
       )}

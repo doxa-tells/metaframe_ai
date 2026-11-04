@@ -4,6 +4,15 @@ import { promises as fs } from "fs";
 import path from "path";
 import { createHmac, randomUUID } from "crypto";
 import { put, list, del } from "@vercel/blob";
+import { BASE } from "./base";
+
+// Ссылки на локальные файлы (режим разработки): /studio/api/files/<ключ>; старые — без /studio
+export const LOCAL_PREFIX = `${BASE}/api/files/`;
+export function localKeyOf(url: string): string | null {
+  if (url.startsWith(LOCAL_PREFIX)) return url.slice(LOCAL_PREFIX.length);
+  if (url.startsWith("/api/files/")) return url.slice("/api/files/".length);
+  return null;
+}
 
 // Хранилище: Cloudflare R2 через воркер (основной вариант), Vercel Blob (запасной)
 // или локальная папка .data для разработки.
@@ -96,7 +105,7 @@ export async function putFile(pathname: string, body: Body, contentType: string)
     }
     await fs.writeFile(full, Buffer.concat(chunks));
   }
-  return `/api/files/${pathname}`;
+  return `${LOCAL_PREFIX}${pathname}`;
 }
 
 export async function putJSON(pathname: string, data: unknown): Promise<string> {
@@ -138,16 +147,17 @@ export async function listItems(prefix: string, limit = 50, cursor?: string): Pr
   const start = cursor ? Number(cursor) : 0;
   const slice = all.slice(start, start + limit);
   return {
-    items: slice.map((p) => ({ pathname: p, url: `/api/files/${p}` })),
+    items: slice.map((p) => ({ pathname: p, url: `${LOCAL_PREFIX}${p}` })),
     cursor: start + limit < all.length ? String(start + limit) : undefined,
   };
 }
 
 export async function readJSON<T>(item: StoredItem | string): Promise<T | null> {
   const url = typeof item === "string" ? item : item.url;
-  if (storageMode === "local" && url.startsWith("/api/files/")) {
+  const lk = localKeyOf(url);
+  if (storageMode === "local" && lk) {
     try {
-      const txt = await fs.readFile(path.join(LOCAL_DIR, url.slice("/api/files/".length)), "utf8");
+      const txt = await fs.readFile(path.join(LOCAL_DIR, lk), "utf8");
       return JSON.parse(txt) as T;
     } catch { return null; }
   }

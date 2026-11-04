@@ -241,7 +241,7 @@ export function Composer(p: Props) {
         <button type="button" className={`gen-btn ${nudge ? "nudge" : ""}`} onClick={tryGenerate}
           title={p.validation ?? p.missingKey ?? "Ctrl/Cmd + Enter"}>
           <span>СГЕНЕРИРОВАТЬ</span>
-          <small>≈{formatUsd(p.cost)}</small>
+          <small>~{formatUsd(p.cost)}</small>
         </button>
       </div>
 

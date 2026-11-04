@@ -4,10 +4,11 @@ import {
   GenRequest, Kind, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, ARK_MODEL_IDS,
 } from "./models";
 import { describeNetError } from "./net";
-import { putFile, putJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, StoredItem } from "./storage";
+import { putFile, putJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, localKeyOf, StoredItem } from "./storage";
 import * as hf from "./providers/higgsfield";
 import { nanoBananaGenerate, fetchAsInline } from "./providers/google";
 import * as ark from "./providers/byteplus";
+import { withBase } from "./base";
 
 export type JobStatus = "queued" | "in_progress" | "completed" | "failed" | "nsfw" | "canceled";
 export type JobOutput = { url: string; type: "image" | "video" };
@@ -72,8 +73,9 @@ async function copyOutput(id: string, index: number, out: JobOutput): Promise<Jo
 }
 
 async function loadInline(url: string, origin: string) {
-  if (url.startsWith("/api/files/")) {
-    const buf = await readLocalFile(url.slice("/api/files/".length));
+  const lk = localKeyOf(url);
+  if (lk) {
+    const buf = await readLocalFile(lk);
     if (!buf) throw new hf.ProviderError("Референс не найден", 400);
     const ext = url.split(".").pop()?.toLowerCase();
     const mimeType = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png";
@@ -84,7 +86,7 @@ async function loadInline(url: string, origin: string) {
 
 // BytePlus принимает публичные URL или data URI; локальные файлы (режим разработки) отдаём как data URI
 async function toProviderUrl(url: string, origin: string): Promise<string> {
-  if (url.startsWith("/api/files/")) {
+  if (localKeyOf(url)) {
     const inl = await loadInline(url, origin);
     return `data:${inl.mimeType};base64,${inl.data}`;
   }
@@ -245,7 +247,7 @@ export async function pollJob(id: string, providerRequestId: string): Promise<Pa
   if (providerRequestId.startsWith("mock:")) {
     const started = Number(providerRequestId.slice(5));
     if (Date.now() - started < 8000) return { id, status: Date.now() - started < 3000 ? "queued" : "in_progress" };
-    const done = await finalize(id, { status: "completed", outputs: [{ url: "/mock.mp4", type: "video" }] });
+    const done = await finalize(id, { status: "completed", outputs: [{ url: withBase("/mock.mp4"), type: "video" }] });
     return done ?? { id, status: "failed", error: "Задача не найдена" };
   }
   if (providerRequestId.startsWith("sync:")) {

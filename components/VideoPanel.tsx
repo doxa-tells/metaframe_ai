@@ -243,6 +243,7 @@ export function VideoPanel(p: Props) {
               onClick={() => sendToChat({ text: `Улучши промпт для ${p.model.name} (режим «${p.mode.label}»):\n${p.prompt}` })}>
               <Icon name="sparkle" size={14} /> Улучшить
             </button>
+            <span className="price-tag" title="Примерная стоимость генерации">~{formatUsd(p.cost)}</span>
           </div>
         </div>
 
@@ -252,7 +253,7 @@ export function VideoPanel(p: Props) {
       <div className="vfoot">
         {(message || p.mode.hint) && <div className={`small ${message ? "err" : "muted"}`}>{message ?? p.mode.hint}</div>}
         <button className={`vgen ${nudge ? "nudge" : ""}`} onClick={tryGenerate} title={p.validation ?? p.missingKey ?? "Ctrl/Cmd + Enter"}>
-          Сгенерировать <span><Icon name="sparkle" size={15} /> {formatUsd(p.cost)}</span>
+          Сгенерировать
         </button>
         <div className="muted tiny-text">{p.model.priceNote}</div>
       </div>

@@ -3,6 +3,7 @@ import type { Edge } from "@xyflow/react";
 import { defaultParams, getMode, getModel, validateRequest, type GenRequest } from "@/lib/models";
 import { generate, waitForJob } from "@/lib/client";
 import type { FlowData, FlowNode } from "./nodeTypes";
+import { withBase } from "@/lib/base";
 
 type Value = { text: string[]; image: string[]; video: string[] };
 const empty = (): Value => ({ text: [], image: [], video: [] });
@@ -36,7 +37,7 @@ export function buildNodeRequest(node: FlowNode, prompt: string, images: string[
 
 async function runLlm(instruction: string, input: string, signal: { cancelled: boolean }): Promise<string> {
   const content = [instruction || "Сделай из этого готовый промпт.", input].filter(Boolean).join("\n\n");
-  const res = await fetch("/api/chat", {
+  const res = await fetch(withBase("/api/chat"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages: [{ role: "user", content: content + "\n\nВерни ровно один готовый промпт в блоке кода." }] }),

@@ -1,5 +1,5 @@
 import { googleKey, GEMINI_CHAT_MODEL, fetchAsInline } from "@/lib/providers/google";
-import { readLocalFile, toAbsolute } from "@/lib/storage";
+import { localKeyOf, readLocalFile, toAbsolute } from "@/lib/storage";
 import { requestOrigin } from "@/lib/http";
 
 export const maxDuration = 120;
@@ -10,8 +10,9 @@ type Body = { messages: Msg[]; system?: string };
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5";
 
 async function inline(url: string, origin: string) {
-  if (url.startsWith("/api/files/")) {
-    const buf = await readLocalFile(url.slice("/api/files/".length));
+  const lk = localKeyOf(url);
+  if (lk) {
+    const buf = await readLocalFile(lk);
     if (buf) return { mimeType: url.endsWith(".svg") ? "image/svg+xml" : "image/png", data: buf.toString("base64") };
   }
   return fetchAsInline(toAbsolute(url, origin));

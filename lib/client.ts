@@ -1,5 +1,6 @@
 "use client";
 import type { GenRequest, Kind } from "./models";
+import { withBase } from "./base";
 
 export type JobStatus = "queued" | "in_progress" | "completed" | "failed" | "nsfw" | "canceled";
 export type JobOutput = { url: string; type: "image" | "video" };
@@ -20,12 +21,12 @@ export type AppConfig = {
 };
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(withBase(url), {
     ...init,
     headers: init?.body && !(init.body instanceof FormData) ? { "Content-Type": "application/json", ...(init?.headers ?? {}) } : init?.headers,
   });
   if (res.status === 401) {
-    window.location.href = "/login";
+    window.location.href = withBase("/login");
     throw new Error("Нужен вход");
   }
   const data = await res.json().catch(() => ({}));
@@ -72,7 +73,7 @@ export async function uploadFile(file: File, storage: "worker" | "blob" | "local
   if (storage === "blob") {
     const { upload } = await import("@vercel/blob/client");
     const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-60) || "file";
-    const res = await upload(`uploads/${safe}`, file, { access: "public", handleUploadUrl: "/api/upload/blob" });
+    const res = await upload(`uploads/${safe}`, file, { access: "public", handleUploadUrl: withBase("/api/upload/blob") });
     return res.url;
   }
   const fd = new FormData();

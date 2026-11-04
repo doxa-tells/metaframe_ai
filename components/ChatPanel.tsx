@@ -5,6 +5,7 @@ import { Icon } from "./Icon";
 import { PillPopover } from "./Popover";
 import { PROMPT_ENGINEER_TEMPLATE } from "@/lib/chat";
 import { deleteChatApi, getChat, listChats, saveChat, timeAgo, uploadFile, type ChatMeta, type ChatMsg, type ChatRecord } from "@/lib/client";
+import { withBase } from "@/lib/base";
 
 const MAX_IMAGES = 6;
 const isUrl = (u: string) => /^(https?:\/\/|\/)/.test(u);
@@ -167,12 +168,12 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
     setBusy(true);
     let acc = "";
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch(withBase("/api/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: history, system: base.instructions }),
       });
-      if (res.status === 401) { window.location.href = "/login"; return; }
+      if (res.status === 401) { window.location.href = withBase("/login"); return; }
       const reader = res.body!.getReader();
       const dec = new TextDecoder();
       for (;;) {

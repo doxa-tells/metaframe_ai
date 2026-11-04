@@ -1,5 +1,6 @@
+import { withBase } from "./base";
 // Хромовые картинки интерфейса (public/assets)
-export const asset = (name: string) => `/assets/${name}.webp`;
+export const asset = (name: string) => withBase(`/assets/${name}.webp`);
 
 // Эмблема компании-разработчика модели
 export function emblemFor(modelId: string): string {
