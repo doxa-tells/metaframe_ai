@@ -35,7 +35,7 @@ function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "Escape" && chatOpen && !document.querySelector(".modal-bg, .popover")) { setChatOpen(false); return; }
+      if (e.key === "Escape" && chatOpen && !e.defaultPrevented && !document.querySelector(".modal-bg, .popover")) { setChatOpen(false); return; }
       if (typing(e.target)) return;
       const nav = NAV.find((n) => n.key === e.key);
       if (nav) { router.push(nav.href); return; }

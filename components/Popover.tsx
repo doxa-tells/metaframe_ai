@@ -1,5 +1,8 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+
+const isPhone = () => typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches;
 
 // Кнопка с выпадающей панелью; закрывается по клику снаружи и Esc.
 // variant="pill" — таблетка (панель открывается вверх), "card" — карточка параметра (панель вниз).
@@ -10,11 +13,16 @@ export function PillPopover({
   width?: number; align?: "left" | "right"; className?: string; variant?: "pill" | "card"; placement?: "up" | "down";
 }) {
   const [open, setOpen] = useState(false);
+  const [sheet, setSheet] = useState(false); // на телефоне — шторка снизу поверх всего экрана
   const ref = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!ref.current?.contains(t) && !popRef.current?.contains(t)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); setOpen(false); } };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
@@ -22,13 +30,23 @@ export function PillPopover({
   const place = placement ?? (variant === "card" ? "down" : "up");
   return (
     <div className={`pop-wrap ${className}`} ref={ref}>
-      <button type="button" className={`${variant === "card" ? "pcard" : "pill"} ${open || active ? "on" : ""}`} onClick={() => setOpen(!open)} title={title}>
+      <button type="button" className={`${variant === "card" ? "pcard" : "pill"} ${open || active ? "on" : ""}`} onClick={() => { setSheet(isPhone()); setOpen(!open); }} title={title}>
         {label}
       </button>
-      {open && (
-        <div className={`popover ${align} ${place}`} style={{ width }}>
+      {open && !sheet && (
+        <div ref={popRef} className={`popover ${align} ${place}`} style={{ width }}>
           {children(() => setOpen(false))}
         </div>
+      )}
+      {open && sheet && createPortal(
+        <>
+          <div className="sheet-bg" />
+          <div ref={popRef} className="popover sheet">
+            <div className="sheet-grip" />
+            {children(() => setOpen(false))}
+          </div>
+        </>,
+        document.body,
       )}
     </div>
   );

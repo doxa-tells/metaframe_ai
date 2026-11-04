@@ -28,14 +28,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const handler = useRef<InsertHandler | null>(null);
   const [canInsert, setCanInsert] = useState(false);
   const [chatContext, setChatContext] = useState<{ modelId?: string; modeId?: string }>({});
-  const [chatOpen, setChatOpenState] = useState(true);
+  const [chatOpen, setChatOpenState] = useState(false);
   const [pendingChat, setPendingChat] = useState<{ text?: string; images?: string[] } | null>(null);
 
   useEffect(() => {
     getConfig().then(setConfig).catch(() => {});
     try {
+      // На телефоне чат занимает весь экран — открываем только по кнопке
+      const mobile = window.matchMedia("(max-width: 760px)").matches;
       const saved = localStorage.getItem("chatOpen");
-      if (saved !== null) setChatOpenState(saved === "1");
+      if (!mobile) setChatOpenState(saved === null ? true : saved === "1");
     } catch { /* нет доступа к storage */ }
   }, []);
 

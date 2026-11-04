@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getModel, formatUsd } from "@/lib/models";
 import { isTerminal, STATUS_LABEL, timeAgo, type Job, type JobOutput } from "@/lib/client";
 import { downloadItems, fileNameFor } from "@/lib/archive";
@@ -219,7 +220,8 @@ export function Gallery(p: Props) {
   // Клавиши: Esc — снять выделение, Cmd/Ctrl+A — выбрать всё, Delete — удалить
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (open || inField(e.target)) return;
+      if (open) { if (e.key === "Escape") { e.preventDefault(); setOpen(null); } return; }
+      if (inField(e.target)) return;
       if (e.key === "Escape" && selecting) { clearSel(); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && selectable.length) { e.preventDefault(); selectAll(); return; }
       if ((e.key === "Delete" || e.key === "Backspace") && sel.size && !busy) { e.preventDefault(); deleteSelected(); }
@@ -456,9 +458,10 @@ export function Gallery(p: Props) {
         const viewing = refs.find((r) => r.url === refView) ?? null;
         const curUrl = viewing?.url ?? out.url;
         const curIsImage = viewing ? viewing.kind === "image" : out.type === "image";
-        return (
-          <div className="modal-bg" onClick={() => setOpen(null)}>
+        return createPortal(
+          <div className="modal-bg lb-bg" onClick={() => setOpen(null)}>
             <div className="lightbox" onClick={(e) => e.stopPropagation()}>
+              <button className="lb-close" onClick={() => setOpen(null)} aria-label="Закрыть"><Icon name="x" size={18} /></button>
               <div className="lightbox-media">
                 {viewing ? (
                   <>
@@ -512,7 +515,8 @@ export function Gallery(p: Props) {
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         );
       })()}
     </div>
