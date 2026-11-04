@@ -75,7 +75,7 @@ textarea { resize: vertical; line-height: 1.45; }
 .shell { display: flex; height: 100vh; overflow: hidden; }
 .sidenav { width: 64px; flex-shrink: 0; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 14px 0; gap: 6px; }
 .logo { width: 38px; height: 38px; display: grid; place-items: center; margin-bottom: 10px; }
-.logo img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 0 8px rgba(0,229,255,.35)); }
+.logo img { width: 100%; height: 100%; object-fit: contain; }
 .logo.big { width: 64px; height: 64px; margin: 0 auto 8px; }
 .navbtn { width: 52px; padding: 7px 0 6px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 4px;
   font-size: 10.5px; color: var(--muted); background: none; border: none; cursor: pointer; }
@@ -359,7 +359,7 @@ textarea.prompt { min-height: 110px; font-size: 14px; }
 .tact { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border-radius: 9px; border: 1px solid rgba(255,255,255,.14);
   background: rgba(22,22,27,.72); backdrop-filter: blur(10px); color: #fff; cursor: pointer; font-size: 12px; }
 .tact:hover { background: rgba(40,40,48,.9); }
-.play { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); color: #fff; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); pointer-events: none; transition: opacity .15s; }
+.play { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); color: #fff; pointer-events: none; transition: opacity .15s; }
 .play svg { fill: #fff; }
 .tile:hover .play { opacity: 0; }
 .tile-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 10px 8px; font-size: 11.5px; color: #ddd; background: linear-gradient(transparent, rgba(0,0,0,.75));
@@ -467,3 +467,39 @@ h1, h2, h3, h4, .day h3, .hero-title, .chat-title, .modal-head b, .palette-title
 .vdrop-head > span:first-child, .fnode-head, .gbar-count, .lightbox-side > .row > b, .gen-btn > span, .vgen { font-family: var(--font-head); }
 .vgen > span { font-family: var(--font-ui); }
 .pill, .tact, .tbtn, .opt { letter-spacing: normal; }
+
+/* ===== Хромовые картинки ===== */
+.navicon { width: 28px; height: 28px; object-fit: contain; opacity: .55; filter: saturate(.55); transition: opacity .15s, filter .15s, transform .15s; pointer-events: none; }
+.navbtn:hover .navicon { opacity: .9; filter: none; }
+.navbtn.active .navicon { opacity: 1; filter: none; transform: scale(1.06); }
+.vtabs button { display: inline-flex; align-items: center; gap: 6px; }
+.tabicon { width: 18px; height: 18px; object-fit: contain; opacity: .6; }
+.vtabs button.on .tabicon { opacity: 1; }
+.hero { background-color: #05080c; background-size: cover; background-position: right center; }
+.hero-emblem { position: absolute; right: 12px; bottom: 10px; width: 50px; height: 50px; object-fit: contain; pointer-events: none; }
+.opt.with-emblem { display: flex; flex-direction: row; align-items: center; gap: 10px; }
+.opt-emblem { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+.opt-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; }
+.pill-emblem { width: 20px; height: 20px; object-fit: contain; margin: -2px 0; }
+.empty { border: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 40px 20px; }
+.empty img { width: min(420px, 80%); aspect-ratio: 700 / 420; object-fit: cover; -webkit-mask-image: radial-gradient(ellipse at center, #000 35%, transparent 70%); mask-image: radial-gradient(ellipse at center, #000 35%, transparent 70%); }
+.login { background: #000 url(/assets/login-bg.webp) center / cover no-repeat; }
+.login-box { background: rgba(10,10,12,.78); backdrop-filter: blur(10px); }
+.logo.big { width: 96px; height: 96px; }
+/* Кнопка «Сгенерировать» из хромовой таблетки: края не растягиваются (9-slice) */
+.gen-btn, .vgen { background: transparent; border: 0 solid transparent; box-shadow: none;
+  border-image: url(/assets/btn-generate.webp) 0 80 0 80 fill / 0 var(--cap) 0 var(--cap) / 0 stretch;
+  color: #fff; transition: filter .15s, transform .1s; }
+.gen-btn { --cap: 29px; }
+.vgen { --cap: 22px; }
+.gen-btn:hover:not(:disabled), .vgen:hover:not(:disabled) { background: transparent; filter: brightness(1.12) saturate(1.1); }
+.gen-btn:disabled, .vgen:disabled { filter: grayscale(.7) brightness(.6); opacity: 1; }
+.gen-btn small { opacity: .9; }
+.login-box .btn.accent { --cap: 22px; height: 44px; background: transparent; border: 0 solid transparent;
+  border-image: url(/assets/btn-generate.webp) 0 80 0 80 fill / 0 var(--cap) 0 var(--cap) / 0 stretch;
+  color: #fff; font-family: var(--font-head); font-size: 14px; }
+.login-box .btn.accent:hover:not(:disabled) { filter: brightness(1.12); }
+.login-box .btn.accent:disabled { filter: grayscale(.7) brightness(.6); opacity: 1; }
+
+/* Без теней у текста и картинок поверх фона */
+.gen-btn, .vgen, .login-box .btn.accent, .hero-title, .hero-sub, .tile-cap { text-shadow: none; }

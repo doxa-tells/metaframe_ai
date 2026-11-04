@@ -7,6 +7,7 @@ import { Icon } from "./Icon";
 import { OptionList, PillPopover } from "./Popover";
 import { MediaThumb } from "./MediaInput";
 import { useUploader } from "./useUploader";
+import { emblemFor, heroFor, modeIcon } from "@/lib/brand";
 
 type Props = {
   models: ModelSpec[];
@@ -27,10 +28,6 @@ type Props = {
   onSubmit: () => void;
 };
 
-const HERO: Record<string, string> = {
-  "seedance-2.5": "linear-gradient(135deg, #04121f 0%, #0a3b5c 50%, #00a3c4 100%)",
-  "kling-4.0": "linear-gradient(135deg, #070b24 0%, #1b2a6b 50%, #3d6cff 100%)",
-};
 const KIND_ICON: Record<string, string> = { image: "image", video: "video", audio: "sound" };
 
 export function VideoPanel(p: Props) {
@@ -134,7 +131,9 @@ export function VideoPanel(p: Props) {
       {p.model.modes.length > 1 && (
         <div className="vtabs">
           {p.model.modes.map((m) => (
-            <button key={m.id} className={m.id === p.mode.id ? "on" : ""} onClick={() => p.onMode(m.id)} title={m.label}>{m.label.split(" → ")[0]}</button>
+            <button key={m.id} className={m.id === p.mode.id ? "on" : ""} onClick={() => p.onMode(m.id)} title={m.label}>
+              <img className="tabicon" src={modeIcon(m.id)} alt="" draggable={false} />{m.label.split(" → ")[0]}
+            </button>
           ))}
         </div>
       )}
@@ -142,7 +141,8 @@ export function VideoPanel(p: Props) {
       <div className="vscroll">
         <PillPopover variant="card" className="hero-wrap" width={340} title="Сменить модель"
           label={
-            <div className="hero" style={{ background: HERO[p.model.id] ?? "linear-gradient(135deg,#222,#444)" }}>
+            <div className="hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(0,0,0,.82) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%), url(${heroFor(p.model.id)})` }}>
+              <img className="hero-emblem" src={emblemFor(p.model.id)} alt="" draggable={false} />
               <span className="hero-change"><Icon name="pencil" size={13} /> Сменить</span>
               <div className="hero-title">{p.mode.label.toUpperCase()}</div>
               <div className="hero-sub">{p.model.name} {p.model.badge && <span className="badge">{p.model.badge}</span>}</div>
@@ -151,9 +151,12 @@ export function VideoPanel(p: Props) {
           {(close) => (
             <div className="opt-list">
               {p.models.map((m) => (
-                <button key={m.id} type="button" className={`opt model ${m.id === p.model.id ? "on" : ""}`} onClick={() => { p.onModel(m.id); close(); }}>
-                  <span className="row gap4"><b>{m.name}</b>{m.badge && <span className="badge">{m.badge}</span>}</span>
-                  <span className="opt-hint">{m.vendor} · {m.description}</span>
+                <button key={m.id} type="button" className={`opt model with-emblem ${m.id === p.model.id ? "on" : ""}`} onClick={() => { p.onModel(m.id); close(); }}>
+                  <img className="opt-emblem" src={emblemFor(m.id)} alt="" draggable={false} />
+                  <span className="opt-body">
+                    <span className="row gap4"><b>{m.name}</b>{m.badge && <span className="badge">{m.badge}</span>}</span>
+                    <span className="opt-hint">{m.vendor} · {m.description}</span>
+                  </span>
                 </button>
               ))}
             </div>

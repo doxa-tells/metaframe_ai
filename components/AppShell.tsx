@@ -4,13 +4,14 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { AppProvider, useApp } from "./AppContext";
 import { ChatPanel } from "./ChatPanel";
-import { Icon } from "./Icon";
+import { asset } from "@/lib/brand";
 
 const NAV = [
-  { href: "/image", label: "Фото", icon: "image" },
-  { href: "/video", label: "Видео", icon: "video" },
-  { href: "/nodes", label: "Ноды", icon: "nodes" },
+  { href: "/image", label: "Фото", icon: "icon-photo" },
+  { href: "/video", label: "Видео", icon: "icon-video" },
+  { href: "/nodes", label: "Ноды", icon: "icon-nodes" },
 ];
+const NavIcon = ({ name }: { name: string }) => <img className="navicon" src={asset(name)} alt="" draggable={false} />;
 
 function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
@@ -27,20 +28,20 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="shell">
       <nav className="sidenav">
-        <div className="logo"><img src="/logo.png" alt="MetaFrame" /></div>
+        <div className="logo"><img src={asset("logo-chrome")} alt="MetaFrame" draggable={false} /></div>
         {NAV.map((n) => (
           <Link key={n.href} href={n.href} className={`navbtn ${path?.startsWith(n.href) ? "active" : ""}`} title={n.label}>
-            <Icon name={n.icon} size={18} />
+            <NavIcon name={n.icon} />
             <span>{n.label}</span>
           </Link>
         ))}
         <div className="grow" />
         <button className={`navbtn ${chatOpen ? "active" : ""}`} onClick={() => setChatOpen(!chatOpen)} title="Промпт-ассистент">
-          <Icon name="chat" size={18} />
+          <NavIcon name="icon-chat" />
           <span>Чат</span>
         </button>
         <button className="navbtn" onClick={logout} title="Выйти">
-          <Icon name="logout" size={18} />
+          <NavIcon name="icon-logout" />
           <span>Выход</span>
         </button>
       </nav>

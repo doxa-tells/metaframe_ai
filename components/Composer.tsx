@@ -9,6 +9,7 @@ import { ParamControls } from "./ParamControls";
 import { SoulIdPicker } from "./SoulIdPicker";
 import { MediaThumb } from "./MediaInput";
 import { useUploader } from "./useUploader";
+import { emblemFor } from "@/lib/brand";
 
 const COUNT_KEYS = ["count", "batch_size"];
 const PARAM_ICON: Record<string, string> = {
@@ -180,13 +181,16 @@ export function Composer(p: Props) {
           )}
 
           <PillPopover width={330} title="Модель"
-            label={<><Icon name={p.model.kind === "image" ? "image" : "film"} size={15} /><span className="pill-model">{p.model.name}</span><Icon name="chevron" size={13} /></>}>
+            label={<><img className="pill-emblem" src={emblemFor(p.model.id)} alt="" draggable={false} /><span className="pill-model">{p.model.name}</span><Icon name="chevron" size={13} /></>}>
             {(close) => (
               <div className="opt-list">
                 {p.models.map((m) => (
-                  <button key={m.id} type="button" className={`opt model ${m.id === p.model.id ? "on" : ""}`} onClick={() => { p.onModel(m.id); close(); }}>
-                    <span className="row gap4"><b>{m.name}</b>{m.badge && <span className="badge">{m.badge}</span>}</span>
-                    <span className="opt-hint">{m.vendor} · {m.description}</span>
+                  <button key={m.id} type="button" className={`opt model with-emblem ${m.id === p.model.id ? "on" : ""}`} onClick={() => { p.onModel(m.id); close(); }}>
+                    <img className="opt-emblem" src={emblemFor(m.id)} alt="" draggable={false} />
+                    <span className="opt-body">
+                      <span className="row gap4"><b>{m.name}</b>{m.badge && <span className="badge">{m.badge}</span>}</span>
+                      <span className="opt-hint">{m.vendor} · {m.description}</span>
+                    </span>
                   </button>
                 ))}
               </div>

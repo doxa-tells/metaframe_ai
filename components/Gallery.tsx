@@ -415,7 +415,12 @@ export function Gallery(p: Props) {
         )}
       </div>
 
-      {!p.loading && p.jobs.length === 0 && <div className="empty">{p.emptyText}</div>}
+      {!p.loading && p.jobs.length === 0 && (
+        <div className="empty">
+          <img src="/assets/empty.webp" alt="" draggable={false} />
+          <div>{p.emptyText}</div>
+        </div>
+      )}
       {body}
       {p.loading && <div className="center pad"><div className="spinner" /></div>}
       {p.hasMore && !p.loading && <div className="center pad"><button className="btn" onClick={p.onLoadMore}>Показать ещё</button></div>}
