@@ -6,6 +6,7 @@ import { downloadItems, fileNameFor } from "@/lib/archive";
 import { useApp } from "./AppContext";
 import { Icon } from "./Icon";
 import { PillPopover } from "./Popover";
+import { MediaThumb } from "./MediaInput";
 
 export type GalleryView = { layout: "masonry" | "square"; split: boolean; masonrySize: number; squareSize: number };
 export type BulkItem = { id: string; indexes?: number[] };
@@ -104,6 +105,8 @@ export function Gallery(p: Props) {
   const { sendToChat } = useApp();
   const [view, setView] = useView(p.viewKey, p.defaultView);
   const [open, setOpen] = useState<{ job: Job; index: number } | null>(null);
+  const [refView, setRefView] = useState<string | null>(null); // какой референс открыт в окне просмотра
+  useEffect(() => { setRefView(null); }, [open]);
   const [aspects, setAspects] = useState<Record<string, number>>({});
   const [copied, setCopied] = useState<string | null>(null);
   const [refAspects, setRefAspects] = useState<Record<string, number>>({});
@@ -430,11 +433,35 @@ export function Gallery(p: Props) {
         if (!out) return null;
         const model = getModel(open.job.modelId);
         const mode = model?.modes.find((m) => m.id === open.job.modeId);
+        // Референсы, с которыми делалась генерация (в порядке входов модели)
+        const refs: { url: string; kind: string; tag: string; label: string }[] = [];
+        const seen = new Set<string>();
+        for (const spec of mode?.inputs ?? []) {
+          (open.job.inputs?.[spec.key] ?? []).filter(Boolean).forEach((u, i) => {
+            seen.add(spec.key);
+            refs.push({ url: u, kind: spec.kind, tag: spec.max === 1 ? spec.label.split(" (")[0] : String(i + 1), label: spec.label });
+          });
+        }
+        for (const [k, list] of Object.entries(open.job.inputs ?? {})) {
+          if (seen.has(k)) continue;
+          (list ?? []).filter(Boolean).forEach((u, i) => refs.push({ url: u, kind: /\.(mp4|mov|webm)(\?|$)/i.test(u) ? "video" : "image", tag: String(i + 1), label: k }));
+        }
+        const viewing = refs.find((r) => r.url === refView) ?? null;
+        const curUrl = viewing?.url ?? out.url;
+        const curIsImage = viewing ? viewing.kind === "image" : out.type === "image";
         return (
           <div className="modal-bg" onClick={() => setOpen(null)}>
             <div className="lightbox" onClick={(e) => e.stopPropagation()}>
               <div className="lightbox-media">
-                {out.type === "video" ? <video src={out.url} controls autoPlay loop playsInline /> : <img src={out.url} alt="" />}
+                {viewing ? (
+                  <>
+                    {viewing.kind === "video" ? <video key={viewing.url} src={viewing.url} controls autoPlay loop playsInline />
+                      : viewing.kind === "audio" ? <audio key={viewing.url} src={viewing.url} controls autoPlay className="lb-audio" />
+                      : <img key={viewing.url} src={viewing.url} alt="" />}
+                    <button className="pill lb-back" onClick={() => setRefView(null)}><Icon name="reuse" size={14} />К результату</button>
+                    <span className="lb-viewing">Референс · {viewing.label}</span>
+                  </>
+                ) : out.type === "video" ? <video src={out.url} controls autoPlay loop playsInline /> : <img src={out.url} alt="" />}
               </div>
               <div className="lightbox-side">
                 <div className="row between">
@@ -443,6 +470,20 @@ export function Gallery(p: Props) {
                 </div>
                 <div className="muted small">{mode?.label} · {timeAgo(open.job.createdAt)} · {formatUsd(open.job.cost)}</div>
                 {open.job.prompt && <div className="lb-prompt">{open.job.prompt}</div>}
+                {refs.length > 0 && (
+                  <div className="lb-refs">
+                    <div className="lb-sub">Референсы · {refs.length}</div>
+                    <div className="lb-ref-grid">
+                      {refs.map((r, i) => (
+                        <button key={r.url + i} type="button" className={`lb-ref ${refView === r.url ? "on" : ""}`} title={`${r.label} — открыть`}
+                          onClick={() => setRefView(refView === r.url ? null : r.url)}>
+                          <MediaThumb url={r.url} kind={r.kind} />
+                          <span className="tag">{r.tag}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="lb-params">
                   {Object.entries(open.job.params).filter(([, v]) => v !== null && v !== "").map(([k, v]) => (
                     <span key={k} className="chip static">{k}: {String(v)}</span>
@@ -450,16 +491,16 @@ export function Gallery(p: Props) {
                 </div>
                 <div className="col gap8">
                   <button className="btn" onClick={() => { p.onReuse(open.job); setOpen(null); }}><Icon name="reuse" size={14} /> Повторить настройки</button>
-                  {p.onUseAsInput && out.type === "image" && (
-                    <button className="btn" onClick={() => { p.onUseAsInput!(out.url); setOpen(null); }}><Icon name="image" size={14} /> Как референс</button>
+                  {p.onUseAsInput && curIsImage && (
+                    <button className="btn" onClick={() => { p.onUseAsInput!(curUrl); setOpen(null); }}><Icon name="image" size={14} /> Как референс</button>
                   )}
-                  {p.onAnimate && out.type === "image" && (
-                    <button className="btn" onClick={() => { p.onAnimate!(out.url); setOpen(null); }}><Icon name="film" size={14} /> Анимировать</button>
+                  {p.onAnimate && curIsImage && (
+                    <button className="btn" onClick={() => { p.onAnimate!(curUrl); setOpen(null); }}><Icon name="film" size={14} /> Анимировать</button>
                   )}
-                  {out.type === "image" && (
-                    <button className="btn" onClick={() => { sendToChat({ images: [out.url], text: "Разбери этот кадр и предложи промпт для похожего" }); setOpen(null); }}><Icon name="chat" size={14} /> Обсудить в чате</button>
+                  {curIsImage && (
+                    <button className="btn" onClick={() => { sendToChat({ images: [curUrl], text: "Разбери этот кадр и предложи промпт для похожего" }); setOpen(null); }}><Icon name="chat" size={14} /> Обсудить в чате</button>
                   )}
-                  <a className="btn" href={out.url} download target="_blank" rel="noreferrer"><Icon name="download" size={14} /> Скачать</a>
+                  <a className="btn" href={curUrl} download target="_blank" rel="noreferrer"><Icon name="download" size={14} /> Скачать</a>
                 </div>
               </div>
             </div>
