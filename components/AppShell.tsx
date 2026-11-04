@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AppProvider, useApp } from "./AppContext";
 import { ChatPanel } from "./ChatPanel";
+import { BalanceBar } from "./BalanceBar";
 import { asset } from "@/lib/brand";
 import { withBase } from "@/lib/base";
 
@@ -79,6 +80,7 @@ function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="tb-right">
+          <BalanceBar />
           <button className={`tb-btn ${chatOpen ? "active" : ""}`} onClick={() => setChatOpen(!chatOpen)} title="Чат (C)">
             <NavIcon name="icon-chat" />
             <span>Чат</span>

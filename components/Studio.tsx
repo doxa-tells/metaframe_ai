@@ -5,6 +5,7 @@ import { MODELS, defaultParams, estimateCost, formatUsd, getMode, getModel, vali
 import { bulkDelete, cancelJob, deleteJob, generate, isTerminal, listJobs, waitForJob, type Job } from "@/lib/client";
 import { useApp } from "./AppContext";
 import { Gallery, type BulkItem } from "./Gallery";
+import { notifySpent } from "./BalanceBar";
 import { Composer } from "./Composer";
 import { VideoPanel } from "./VideoPanel";
 import { Icon } from "./Icon";
@@ -143,6 +144,7 @@ export function Studio({ kind }: { kind: Kind }) {
     try {
       const job = await generate(request);
       setJobs((prev) => prev.map((j) => (j.id === tempId ? job : j)));
+      notifySpent();
       if (job.status === "failed") setError(job.error ?? "Ошибка генерации");
     } catch (e) {
       setJobs((prev) => prev.filter((j) => j.id !== tempId));

@@ -13,7 +13,8 @@ export type ParamSpec =
   | { key: string; label: string; type: "toggle"; default: boolean; advanced?: boolean }
   | { key: string; label: string; type: "text"; default: string; placeholder?: string; advanced?: boolean }
   | { key: string; label: string; type: "seed"; advanced?: boolean }
-  | { key: string; label: string; type: "soulid"; advanced?: boolean };
+  | { key: string; label: string; type: "soulid"; advanced?: boolean }
+  | { key: string; label: string; type: "preset"; presets: string; advanced?: boolean }; // стиль из каталога Higgsfield (presets — путь каталога)
 
 export type InputSpec = {
   key: string; // поле в теле запроса
@@ -34,7 +35,11 @@ export type ModeSpec = {
   inputs: InputSpec[];
   params: ParamSpec[];
   hint?: string;
+  source?: { min: number; max: number }; // ограничения длины видео-исходника, с
 };
+
+// Длительность загруженного видео-исходника: клиент кладёт её в params, в API она не уходит
+export const SRC_DURATION = "__src_duration";
 
 export type ModelSpec = {
   id: string;
@@ -234,7 +239,81 @@ const kling: ModelSpec = {
   ],
 };
 
-export const MODELS: ModelSpec[] = [nanoBanana, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, kling];
+// ---------- Higgsfield Genjutsu (видео → видео) ----------
+const GJ_RES: ParamSpec = { key: "resolution", label: "Разрешение", type: "select", default: "720p", options: opts("480p", "720p", "1080p") };
+// Цена за секунду исходника (после обрезки), округляется вверх до целых секунд
+const GJ_PRICE: Record<string, number> = { "480p": 0.159, "720p": 0.3405, "1080p": 0.816 };
+const GJ_RESTYLE_PRICE: Record<string, number> = { "480p": 0.318, "720p": 0.681, "1080p": 1.632 };
+const GJ_LIGHT_PRICE: Record<string, number> = { "480p": 0.05, "720p": 0.1, "1080p": 0.2 };
+const srcSeconds = (p: Record<string, unknown>, max: number) => {
+  const d = Number(p[SRC_DURATION]);
+  return Math.ceil(Math.min(max, Number.isFinite(d) && d > 0 ? d : 10));
+};
+const GJ_SOURCE = { key: "video_url", label: "Исходное видео", kind: "video", max: 1, single: true, required: true } as const;
+
+const genjutsu: ModelSpec = {
+  id: "genjutsu",
+  name: "Genjutsu",
+  vendor: "Higgsfield",
+  kind: "video",
+  provider: "higgsfield",
+  description: "Видео → видео: перенос движения, замена объекта, рестайл",
+  priceNote: "Higgsfield API: $0.159/с 480p, $0.34/с 720p, $0.816/с 1080p (рестайл ×2) — за секунды исходника, до 30 с",
+  price: (m, p) => (m === "restyle" ? GJ_RESTYLE_PRICE : GJ_PRICE)[String(p.resolution)] * srcSeconds(p, 30) || 0,
+  modes: [
+    {
+      id: "motion", label: "Перенос движения", endpoint: "higgsfield/genjutsu/motion-transfer/v1.0",
+      promptRequired: false, source: { min: 4, max: 30 },
+      inputs: [GJ_SOURCE, { key: "image_urls", label: "Персонажи и сцена", kind: "image", max: 8, required: true, hint: "до 8 картинок: кто играет и где" }],
+      params: [GJ_RES],
+      hint: "Движение, камера и тайминг берутся из видео (4–30 с), а всё в кадре — с картинок",
+    },
+    {
+      id: "swap", label: "Замена объекта", endpoint: "higgsfield/genjutsu/object-swap/v1.0",
+      promptRequired: false, source: { min: 4, max: 30 },
+      inputs: [GJ_SOURCE, { key: "image_urls", label: "На что заменить", kind: "image", max: 8, required: true, hint: "до 8 картинок нового объекта" }],
+      params: [GJ_RES],
+      hint: "Видео 4–30 с, не меньше ~640×640. В промпте укажите, что заменить: «замени кружку на [изображение 1]»",
+    },
+    {
+      id: "restyle", label: "Рестайл", endpoint: "higgsfield/genjutsu/restyle/v1.0",
+      promptRequired: false, source: { min: 4, max: 30 },
+      inputs: [GJ_SOURCE, { key: "image_urls", label: "Персонажи", kind: "image", max: 5, hint: "необязательно, до 5" }],
+      params: [{ key: "preset_id", label: "Стиль", type: "preset", presets: "models/higgsfield/genjutsu/restyle/v1.0/presets" }, GJ_RES],
+      hint: "Перерисовывает всё видео в выбранном стиле (4–30 с). Картинки — только для персонажей",
+    },
+  ],
+};
+
+const genjutsuLight: ModelSpec = {
+  id: "genjutsu-light",
+  name: "Genjutsu Light",
+  vendor: "Higgsfield",
+  kind: "video",
+  provider: "higgsfield",
+  description: "В разы дешевле Genjutsu: перенос движения и замена объекта, до 15 с",
+  badge: "NEW",
+  priceNote: "Higgsfield API: ~$0.05/с 480p, $0.10/с 720p, $0.20/с 1080p — за секунды результата, до 15 с",
+  price: (_m, p) => GJ_LIGHT_PRICE[String(p.resolution)] * srcSeconds(p, 15) || 0,
+  modes: [
+    {
+      id: "motion", label: "Перенос движения", endpoint: "higgsfield/genjutsu-light/motion-transfer/v1.0",
+      promptRequired: false, source: { min: 1, max: 15 },
+      inputs: [GJ_SOURCE, { key: "image_urls", label: "Персонажи и сцена", kind: "image", max: 8, required: true, hint: "до 8 картинок: кто играет и где" }],
+      params: [GJ_RES],
+      hint: "Берутся первые 15 с видео, звук сохраняется",
+    },
+    {
+      id: "swap", label: "Замена объекта", endpoint: "higgsfield/genjutsu-light/object-swap/v1.0",
+      promptRequired: false, source: { min: 1, max: 15 },
+      inputs: [GJ_SOURCE, { key: "image_urls", label: "На что заменить", kind: "image", max: 8, required: true, hint: "до 8 картинок нового объекта" }],
+      params: [GJ_RES],
+      hint: "Берутся первые 15 с видео. В промпте укажите, что заменить: «замени кружку на [изображение 1]»",
+    },
+  ],
+};
+
+export const MODELS: ModelSpec[] = [nanoBanana, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, kling, genjutsu, genjutsuLight];
 
 export function getModel(id: string): ModelSpec | undefined {
   return MODELS.find((m) => m.id === id);
@@ -277,8 +356,13 @@ export function validateRequest(req: GenRequest): string | null {
     if (list.length) anyInput = true;
   }
   if (mode.requireAnyInput && !anyInput) return "Добавьте хотя бы один референс";
+  if (mode.source) {
+    const d = Number(req.params?.[SRC_DURATION]);
+    if (Number.isFinite(d) && d > 0 && d < mode.source.min - 0.05) return `Исходное видео должно быть не короче ${mode.source.min} с`;
+  }
   for (const p of mode.params) {
     const v = req.params?.[p.key];
+    if (p.type === "preset" && !v) return `Выберите: ${p.label}`;
     if (v === undefined || v === null || v === "") continue;
     if (p.type === "select" && !p.options.some((o) => o.value === String(v))) return `${p.label}: недопустимое значение`;
     if (p.type === "slider") {

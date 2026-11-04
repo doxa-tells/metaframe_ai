@@ -129,3 +129,11 @@ export async function getSoulId(id: string): Promise<SoulId> {
   const d = (await hf(`v1/custom-references/${encodeURIComponent(id)}`)) as Record<string, unknown>;
   return normalizeSoul(d);
 }
+
+// ---------- Каталог стилей (Genjutsu Restyle и др.) ----------
+export type HfPreset = { id: string; name: string; preview_url?: string };
+export async function listPresets(path: string): Promise<HfPreset[]> {
+  const d = (await hf(path)) as Record<string, unknown>;
+  const items = (Array.isArray(d) ? d : d.items ?? []) as Record<string, unknown>[];
+  return items.map((x) => ({ id: String(x.id ?? ""), name: String(x.name ?? "Стиль"), preview_url: typeof x.preview_url === "string" ? x.preview_url : undefined })).filter((x) => x.id);
+}

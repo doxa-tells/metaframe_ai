@@ -18,8 +18,8 @@ export function emblemWhiteFor(modelId: string): string {
 // Иконка режима видео: текст / кадр / референсы
 export function modeIcon(modeId: string): string {
   if (modeId === "image") return asset("icon-mode-frame");
-  if (modeId === "reference") return asset("icon-mode-ref");
-  return asset("icon-mode-text");
+  if (modeId === "text") return asset("icon-mode-text");
+  return asset("icon-mode-ref");
 }
 
 // Баннер карточки модели (для моделей без своего баннера — общий)

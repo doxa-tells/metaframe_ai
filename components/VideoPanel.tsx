@@ -1,7 +1,8 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { InputSpec, ModeSpec, ModelSpec, ParamSpec } from "@/lib/models";
-import { formatUsd } from "@/lib/models";
+import { formatUsd, SRC_DURATION } from "@/lib/models";
+import { listPresetsApi, type Preset } from "@/lib/client";
 import { useApp } from "./AppContext";
 import { Icon } from "./Icon";
 import { OptionList, PillPopover } from "./Popover";
@@ -58,8 +59,39 @@ export function VideoPanel(p: Props) {
     setTimeout(() => ta?.focus(), 0);
   }
 
+  // Длительность видео-исходника — для оценки цены и проверки минимальной длины
+  const srcUrl = p.mode.source ? (p.inputs.video_url ?? [])[0] : undefined;
+  const srcDur = Number(p.params[SRC_DURATION]) || 0;
+  const onParamRef = useRef(p.onParam);
+  onParamRef.current = p.onParam;
+  useEffect(() => {
+    if (!p.mode.source) return;
+    if (!srcUrl) { if (srcDur) onParamRef.current(SRC_DURATION, null); return; }
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.muted = true;
+    const done = () => { if (Number.isFinite(v.duration) && v.duration > 0) onParamRef.current(SRC_DURATION, Math.round(v.duration * 10) / 10); };
+    v.addEventListener("loadedmetadata", done);
+    v.src = srcUrl;
+    return () => { v.removeEventListener("loadedmetadata", done); v.removeAttribute("src"); v.load(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srcUrl, p.mode.source]);
+
+  // Каталог стилей (Genjutsu Restyle)
+  const presetSpec = p.mode.params.find((x) => x.type === "preset");
+  const presetPath = presetSpec?.type === "preset" ? presetSpec.presets : null;
+  const [presets, setPresets] = useState<Preset[] | null>(null);
+  const [presetErr, setPresetErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!presetPath) return;
+    let alive = true;
+    setPresetErr(null);
+    listPresetsApi(presetPath).then((x) => alive && setPresets(x)).catch((e) => alive && setPresetErr((e as Error).message));
+    return () => { alive = false; };
+  }, [presetPath]);
+
   const audio = p.mode.params.find((x) => x.key === "generate_audio");
-  const cards = p.mode.params.filter((x) => x.type === "select" || x.type === "slider");
+  const cards = p.mode.params.filter((x) => x.type === "select" || x.type === "slider" || x.type === "preset");
   const touched = Boolean(p.prompt.trim()) || p.mode.inputs.some((s) => valueOf(s).length > 0);
   const [tried, setTried] = useState(false);
   const [nudge, setNudge] = useState(false);
@@ -100,7 +132,7 @@ export function VideoPanel(p: Props) {
         ) : (
           <div className="vslot-empty"><Icon name="plus" size={18} /></div>
         )}
-        <span className="vslot-label">{s.label}{s.required ? " *" : ""}</span>
+        <span className="vslot-label">{s.label}{s.required ? " *" : ""}{v && s.key === "video_url" && srcDur ? ` · ${Math.round(srcDur)} с` : ""}</span>
       </div>
     );
   }
@@ -114,6 +146,31 @@ export function VideoPanel(p: Props) {
         <PillPopover key={spec.key} variant="card" width={220} title={spec.label} placement="up" align={align}
           label={<><span className="pc-label">{spec.label}</span><span className="pc-value">{cur?.label ?? String(v)}</span><Icon name="chevron" size={14} className="pc-chev" /></>}>
           {(close) => <OptionList grid={spec.options.every((o) => o.label.length <= 6)} options={spec.options} value={String(v ?? spec.default)} onPick={(x) => { p.onParam(spec.key, x); close(); }} />}
+        </PillPopover>
+      );
+    }
+    if (spec.type === "preset") {
+      const cur = presets?.find((x) => x.id === v);
+      return (
+        <PillPopover key={spec.key} variant="card" width={292} title={spec.label} placement="up" align="left" className="preset-card"
+          label={<><span className="pc-label">{spec.label}</span><span className="pc-value">{cur?.name ?? "Выбрать"}</span><Icon name="chevron" size={14} className="pc-chev" /></>}>
+          {(close) => (
+            <>
+              <div className="pop-title">{spec.label}</div>
+              {presetErr ? <div className="err small">{presetErr}</div> : !presets ? <div className="muted small">Загружаю стили…</div> : presets.length === 0 ? <div className="muted small">Higgsfield не вернул ни одного стиля</div> : (
+                <div className="preset-grid">
+                  {presets.map((x) => (
+                    <button key={x.id} type="button" className={`preset ${x.id === v ? "on" : ""}`} onClick={() => { p.onParam(spec.key, x.id); close(); }} title={x.name}>
+                      {x.preview_url ? (/\.(mp4|webm|mov)(\?|$)/i.test(x.preview_url)
+                        ? <video src={x.preview_url} muted loop autoPlay playsInline />
+                        : <img src={x.preview_url} alt="" loading="lazy" draggable={false} />) : <span className="preset-ph" />}
+                      <span>{x.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </PillPopover>
       );
     }
@@ -224,7 +281,11 @@ export function VideoPanel(p: Props) {
           <textarea ref={taRef} value={p.prompt} rows={5}
             placeholder={p.mode.id === "reference"
               ? `Опишите видео и роль каждого референса${isKling ? " — ссылайтесь на них через @" : ""}…`
-              : p.mode.id === "image" ? "Опишите действие и движение камеры от первого кадра…" : "Опишите сцену, действие, камеру и звук…"}
+              : p.mode.id === "image" ? "Опишите действие и движение камеры от первого кадра…"
+              : p.mode.id === "swap" ? "Что заменить и на что: «замени кружку в руке на [изображение 1]»…"
+              : p.mode.id === "motion" ? "Необязательно: уточните, кто из картинок кого играет и где…"
+              : p.mode.id === "restyle" ? "Необязательно: что добавить к выбранному стилю…"
+              : "Опишите сцену, действие, камеру и звук…"}
             onChange={(e) => p.onPrompt(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) p.onSubmit(); }} />
           <div className="vchips">

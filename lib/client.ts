@@ -125,3 +125,20 @@ export const getChat = (id: string) => api<{ chat: ChatRecord | null }>(`/api/ch
 export const saveChat = (c: Partial<ChatRecord> & { name: string }) =>
   api<{ chat: ChatRecord }>("/api/chats", { method: "POST", body: JSON.stringify(c) }).then((r) => r.chat);
 export const deleteChatApi = (id: string) => api(`/api/chats?id=${id}`, { method: "DELETE" });
+
+// Баланс по провайдерам (ведётся в студии)
+export type BalanceRow = { provider: "google" | "byteplus" | "higgsfield"; amount: number | null; since: number | null; spent: number; left: number | null; count: number };
+export const getBalances = (fresh = false) => api<{ balances: BalanceRow[] }>(`/api/balance${fresh ? "?fresh=1" : ""}`).then((r) => r.balances);
+export const setBalanceApi = (provider: BalanceRow["provider"], amount: number | null) =>
+  api<{ balances: BalanceRow[] }>("/api/balance", { method: "POST", body: JSON.stringify({ provider, amount }) }).then((r) => r.balances);
+
+export type Preset = { id: string; name: string; preview_url?: string };
+const presetCache = new Map<string, Promise<Preset[]>>();
+export function listPresetsApi(path: string): Promise<Preset[]> {
+  if (!presetCache.has(path)) {
+    const p = api<{ items: Preset[] }>(`/api/presets?path=${encodeURIComponent(path)}`).then((r) => r.items);
+    p.catch(() => presetCache.delete(path));
+    presetCache.set(path, p);
+  }
+  return presetCache.get(path)!;
+}
