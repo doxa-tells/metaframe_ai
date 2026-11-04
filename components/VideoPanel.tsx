@@ -7,7 +7,7 @@ import { Icon } from "./Icon";
 import { OptionList, PillPopover } from "./Popover";
 import { MediaThumb } from "./MediaInput";
 import { useUploader } from "./useUploader";
-import { emblemFor, heroFor, modeIcon } from "@/lib/brand";
+import { emblemFor, emblemWhiteFor, heroFor, modeIcon } from "@/lib/brand";
 
 type Props = {
   models: ModelSpec[];
@@ -142,10 +142,10 @@ export function VideoPanel(p: Props) {
         <PillPopover variant="card" className="hero-wrap" width={340} title="Сменить модель"
           label={
             <div className="hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(0,0,0,.82) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%), url(${heroFor(p.model.id)})` }}>
-              <img className="hero-emblem" src={emblemFor(p.model.id)} alt="" draggable={false} />
+              <img className="hero-emblem" src={emblemWhiteFor(p.model.id)} alt="" draggable={false} />
               <span className="hero-change"><Icon name="pencil" size={13} /> Сменить</span>
               <div className="hero-title">{p.mode.label.toUpperCase()}</div>
-              <div className="hero-sub">{p.model.name} {p.model.badge && <span className="badge">{p.model.badge}</span>}</div>
+              <div className="hero-sub">{p.model.name}</div>
             </div>
           }>
           {(close) => (
@@ -154,7 +154,7 @@ export function VideoPanel(p: Props) {
                 <button key={m.id} type="button" className={`opt model with-emblem ${m.id === p.model.id ? "on" : ""}`} onClick={() => { p.onModel(m.id); close(); }}>
                   <img className="opt-emblem" src={emblemFor(m.id)} alt="" draggable={false} />
                   <span className="opt-body">
-                    <span className="row gap4"><b>{m.name}</b>{m.badge && <span className="badge">{m.badge}</span>}</span>
+                    <b>{m.name}</b>
                     <span className="opt-hint">{m.vendor} · {m.description}</span>
                   </span>
                 </button>

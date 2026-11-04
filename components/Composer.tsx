@@ -188,7 +188,7 @@ export function Composer(p: Props) {
                   <button key={m.id} type="button" className={`opt model with-emblem ${m.id === p.model.id ? "on" : ""}`} onClick={() => { p.onModel(m.id); close(); }}>
                     <img className="opt-emblem" src={emblemFor(m.id)} alt="" draggable={false} />
                     <span className="opt-body">
-                      <span className="row gap4"><b>{m.name}</b>{m.badge && <span className="badge">{m.badge}</span>}</span>
+                      <b>{m.name}</b>
                       <span className="opt-hint">{m.vendor} · {m.description}</span>
                     </span>
                   </button>

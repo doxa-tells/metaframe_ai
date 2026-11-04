@@ -195,7 +195,7 @@ const KL_PRICE: Record<string, number> = { "720p": 0.157, "1080p": 0.235 };
 
 const kling: ModelSpec = {
   id: "kling-4.0",
-  name: "Kling 4.0 (через Higgsfield)",
+  name: "Kling 4.0",
   vendor: "Kuaishou",
   kind: "video",
   provider: "higgsfield",

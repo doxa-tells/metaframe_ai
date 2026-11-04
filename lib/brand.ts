@@ -9,6 +9,11 @@ export function emblemFor(modelId: string): string {
   return asset("emblem-higgsfield");
 }
 
+// Залитая белая эмблема — для ярких фонов (баннер карточки модели)
+export function emblemWhiteFor(modelId: string): string {
+  return emblemFor(modelId).replace(".webp", "-white.webp");
+}
+
 // Иконка режима видео: текст / кадр / референсы
 export function modeIcon(modeId: string): string {
   if (modeId === "image") return asset("icon-mode-frame");
