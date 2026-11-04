@@ -13,7 +13,7 @@ export default function LoginPage() {
     setError(null);
     const res = await fetch(withBase("/api/login"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
     if (res.ok) {
-      window.location.href = withBase("/image");
+      window.location.href = /\/login\/?$/.test(window.location.pathname) ? withBase("/image") : window.location.pathname + window.location.search;
       return;
     }
     const d = await res.json().catch(() => ({}));

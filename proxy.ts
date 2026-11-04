@@ -12,10 +12,12 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Нужен вход" }, { status: 401 });
   }
+  // Показываем вход прямо по этому адресу (без перенаправления) — так пользователь
+  // остаётся на metaframe.ltd/studio, даже когда студия открыта через лендинг
   const url = req.nextUrl.clone();
   url.pathname = "/login";
   url.search = "";
-  return NextResponse.redirect(url);
+  return NextResponse.rewrite(url);
 }
 
 export const config = {
