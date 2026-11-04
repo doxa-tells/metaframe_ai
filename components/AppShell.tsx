@@ -55,7 +55,7 @@ function Shell({ children }: { children: ReactNode }) {
       <header className="topbar">
         <div className="tb-brand-wrap" ref={menuRef}>
           <button type="button" className={`tb-brand ${menu ? "open" : ""}`} onClick={() => setMenu(!menu)} title="Меню" aria-expanded={menu}>
-            <img src={asset("logo-chrome")} alt="" draggable={false} />
+            <img src={asset("logo-bright")} alt="" draggable={false} />
             <span>MetaFrame</span>
           </button>
           {menu && (

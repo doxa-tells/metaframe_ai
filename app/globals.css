@@ -695,3 +695,4 @@ input:focus, select:focus, textarea:focus { border-color: #2b4c5b; }
   /* iPhone приближает страницу при фокусе на полях со шрифтом меньше 16px */
   input[type=text], input[type=password], input[type=number], select, textarea, .comp-prompt, .chat-input textarea, .vprompt textarea { font-size: 16px !important; }
 }
+.tb-brand img { width: 34px; height: 34px; }
