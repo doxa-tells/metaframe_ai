@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MODELS, defaultParams, estimateCost, formatUsd, getMode, getModel, validateRequest, type Kind } from "@/lib/models";
+import { MODELS, defaultParams, estimateCost, firstMode, formatUsd, getModel, validateRequest, visibleMode, type Kind } from "@/lib/models";
 import { bulkDelete, cancelJob, deleteJob, generate, isTerminal, listJobs, waitForJob, type Job } from "@/lib/client";
 import { useApp } from "./AppContext";
 import { Gallery, type BulkItem } from "./Gallery";
@@ -22,7 +22,7 @@ const k = (m: string, mode: string) => `${m}:${mode}`;
 
 function initialForm(kind: Kind): FormState {
   const model = MODELS.find((m) => m.kind === kind)!;
-  return { modelId: model.id, modeId: model.modes[0].id, prompt: "", params: {}, inputs: {} };
+  return { modelId: model.id, modeId: firstMode(model).id, prompt: "", params: {}, inputs: {} };
 }
 
 export function Studio({ kind }: { kind: Kind }) {
@@ -39,7 +39,7 @@ export function Studio({ kind }: { kind: Kind }) {
   const alive = useRef({ cancelled: false });
 
   const model = getModel(form.modelId) ?? MODELS.find((m) => m.kind === kind)!;
-  const mode = getMode(model, form.modeId);
+  const mode = visibleMode(model, form.modeId);
   const key = k(model.id, mode.id);
   const params = useMemo(() => ({ ...defaultParams(mode), ...(form.params[key] ?? {}) }), [mode, form.params, key]);
   const inputs = form.inputs[key] ?? {};
@@ -115,7 +115,7 @@ export function Studio({ kind }: { kind: Kind }) {
 
   function setModel(id: string) {
     const m = getModel(id)!;
-    setForm((f) => ({ ...f, modelId: id, modeId: m.modes.some((x) => x.id === f.modeId) ? f.modeId : m.modes[0].id }));
+    setForm((f) => ({ ...f, modelId: id, modeId: m.modes.some((x) => x.id === f.modeId) ? visibleMode(m, f.modeId).id : firstMode(m).id }));
   }
   function setParam(pk: string, v: unknown) {
     setForm((f) => ({ ...f, params: { ...f.params, [key]: { ...(f.params[key] ?? params), [pk]: v } } }));
@@ -153,9 +153,11 @@ export function Studio({ kind }: { kind: Kind }) {
   }
 
   function reuse(job: Job) {
-    const kk = k(job.modelId, job.modeId);
+    const jm = getModel(job.modelId);
+    const modeId = jm ? visibleMode(jm, job.modeId).id : job.modeId;
+    const kk = k(job.modelId, modeId);
     setForm((f) => ({
-      ...f, modelId: job.modelId, modeId: job.modeId, prompt: job.prompt,
+      ...f, modelId: job.modelId, modeId, prompt: job.prompt,
       params: { ...f.params, [kk]: job.params }, inputs: { ...f.inputs, [kk]: job.inputs },
     }));
   }

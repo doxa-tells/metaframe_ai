@@ -36,6 +36,9 @@ export type ModeSpec = {
   params: ParamSpec[];
   hint?: string;
   source?: { min: number; max: number }; // ограничения длины видео-исходника, с
+  hidden?: boolean; // режим не показывается вкладкой (используется как запасной)
+  textFallback?: string; // без референсов запрос уходит в этот режим (текст → видео)
+  refToken?: (kind: MediaKind, n: number) => string; // как ссылаться на референс в промпте
 };
 
 // Длительность загруженного видео-исходника: клиент кладёт её в params, в API она не уходит
@@ -170,7 +173,17 @@ const seedance: ModelSpec = {
   priceNote: "BytePlus: $0.103/с 480p, $0.231/с 720p, $0.569/с 1080p",
   price: (_m, p) => (SD_PRICE[String(p.resolution)] ?? 0.231) * Number(p.duration ?? 5),
   modes: [
-    { id: "text", label: "Текст → видео", promptRequired: true, inputs: [], params: [SD_DUR, SD_RES, SD_AR, SD_AUDIO] },
+    {
+      id: "reference", label: "Промпт и референсы", promptRequired: false, textFallback: "text",
+      inputs: [
+        { key: "image_urls", label: "Изображения", kind: "image", max: 30 },
+        { key: "video_urls", label: "Видео (2–30 с)", kind: "video", max: 10 },
+        { key: "audio_urls", label: "Аудио (wav/mp3)", kind: "audio", max: 10 },
+      ],
+      params: [SD_DUR, SD_RES, SD_AR, SD_AUDIO],
+      refToken: (k, n) => `@${k === "image" ? "Image" : k === "video" ? "Video" : "Audio"} ${n}`,
+      hint: "Референсы необязательны — без них видео строится по промпту. Ссылки: @Image 1, @Video 1, @Audio 1",
+    },
     {
       id: "image", label: "Кадр → видео", promptRequired: false,
       inputs: [
@@ -180,16 +193,7 @@ const seedance: ModelSpec = {
       params: [SD_DUR, SD_RES, SD_AUDIO],
       hint: "Формат берётся из первого кадра",
     },
-    {
-      id: "reference", label: "Референсы → видео", promptRequired: false, requireAnyInput: true,
-      inputs: [
-        { key: "image_urls", label: "Изображения", kind: "image", max: 30 },
-        { key: "video_urls", label: "Видео (2–30 с)", kind: "video", max: 10 },
-        { key: "audio_urls", label: "Аудио (wav/mp3)", kind: "audio", max: 10 },
-      ],
-      params: [SD_DUR, SD_RES, SD_AR, SD_AUDIO],
-      hint: "Всего до 50 файлов, видео и аудио суммарно до 30 с. В промпте опишите роль каждого референса по порядку",
-    },
+    { id: "text", label: "Текст → видео", hidden: true, promptRequired: true, inputs: [], params: [SD_DUR, SD_RES, SD_AR, SD_AUDIO] },
   ],
 };
 
@@ -210,9 +214,16 @@ const kling: ModelSpec = {
   price: (_m, p) => (KL_PRICE[String(p.resolution)] ?? 0.235) * Number(p.duration ?? 10),
   modes: [
     {
-      id: "text", label: "Текст → видео", endpoint: "kling-video/v4.0/text-to-video",
-      promptRequired: true, inputs: [],
-      params: [KL_DUR, KL_RES, { key: "aspect_ratio", label: "Формат", type: "select", default: "16:9", options: opts("16:9", "9:16", "1:1", "21:9") }],
+      id: "reference", label: "Промпт и референсы", endpoint: "kling-video/v4.0/reference-to-video",
+      promptRequired: true, textFallback: "text",
+      inputs: [
+        { key: "image_urls", label: "Изображения", kind: "image", max: 10 },
+        { key: "video_urls", label: "Видео", kind: "video", max: 5 },
+      ],
+      params: [KL_DUR, KL_RES, { key: "aspect_ratio", label: "Формат", type: "select", default: "adaptive",
+        options: [{ value: "adaptive", label: "Авто" }, ...opts("16:9", "9:16", "1:1", "21:9")] }],
+      refToken: (k, n) => `@${k}_${n}`,
+      hint: "Референсы необязательны — без них видео строится по промпту. Ссылки: @image_1, @video_1",
     },
     {
       id: "image", label: "Ключевые кадры", endpoint: "kling-video/v4.0/image-to-video",
@@ -226,15 +237,9 @@ const kling: ModelSpec = {
       hint: "Формат берётся из кадров. Опишите в промпте действие и движение камеры между кадрами",
     },
     {
-      id: "reference", label: "Референсы → видео", endpoint: "kling-video/v4.0/reference-to-video",
-      promptRequired: true, requireAnyInput: true,
-      inputs: [
-        { key: "image_urls", label: "Изображения", kind: "image", max: 10 },
-        { key: "video_urls", label: "Видео", kind: "video", max: 5 },
-      ],
-      params: [KL_DUR, KL_RES, { key: "aspect_ratio", label: "Формат", type: "select", default: "adaptive",
-        options: [{ value: "adaptive", label: "Авто" }, ...opts("16:9", "9:16", "1:1", "21:9")] }],
-      hint: "Ссылайтесь в промпте: @image_1, @image_2, @video_1…",
+      id: "text", label: "Текст → видео", endpoint: "kling-video/v4.0/text-to-video", hidden: true,
+      promptRequired: true, inputs: [],
+      params: [KL_DUR, KL_RES, { key: "aspect_ratio", label: "Формат", type: "select", default: "16:9", options: opts("16:9", "9:16", "1:1", "21:9") }],
     },
   ],
 };
@@ -265,21 +270,22 @@ const genjutsu: ModelSpec = {
       id: "motion", label: "Перенос движения", endpoint: "higgsfield/genjutsu/motion-transfer/v1.0",
       promptRequired: false, source: { min: 4, max: 30 },
       inputs: [GJ_SOURCE, { key: "image_urls", label: "Персонажи и сцена", kind: "image", max: 8, required: true, hint: "до 8 картинок: кто играет и где" }],
-      params: [GJ_RES],
+      params: [GJ_RES], refToken: (_k, n) => `@image_${n}`,
       hint: "Движение, камера и тайминг берутся из видео (4–30 с), а всё в кадре — с картинок",
     },
     {
       id: "swap", label: "Замена объекта", endpoint: "higgsfield/genjutsu/object-swap/v1.0",
       promptRequired: false, source: { min: 4, max: 30 },
       inputs: [GJ_SOURCE, { key: "image_urls", label: "На что заменить", kind: "image", max: 8, required: true, hint: "до 8 картинок нового объекта" }],
-      params: [GJ_RES],
-      hint: "Видео 4–30 с, не меньше ~640×640. В промпте укажите, что заменить: «замени кружку на [изображение 1]»",
+      params: [GJ_RES], refToken: (_k, n) => `@image_${n}`,
+      hint: "Видео 4–30 с, не меньше ~640×640. В промпте укажите, что заменить: «замени кружку на @image_1»",
     },
     {
       id: "restyle", label: "Рестайл", endpoint: "higgsfield/genjutsu/restyle/v1.0",
       promptRequired: false, source: { min: 4, max: 30 },
       inputs: [GJ_SOURCE, { key: "image_urls", label: "Персонажи", kind: "image", max: 5, hint: "необязательно, до 5" }],
       params: [{ key: "preset_id", label: "Стиль", type: "preset", presets: "models/higgsfield/genjutsu/restyle/v1.0/presets" }, GJ_RES],
+      refToken: (_k, n) => `@image_${n}`,
       hint: "Перерисовывает всё видео в выбранном стиле (4–30 с). Картинки — только для персонажей",
     },
   ],
@@ -300,15 +306,15 @@ const genjutsuLight: ModelSpec = {
       id: "motion", label: "Перенос движения", endpoint: "higgsfield/genjutsu-light/motion-transfer/v1.0",
       promptRequired: false, source: { min: 1, max: 15 },
       inputs: [GJ_SOURCE, { key: "image_urls", label: "Персонажи и сцена", kind: "image", max: 8, required: true, hint: "до 8 картинок: кто играет и где" }],
-      params: [GJ_RES],
+      params: [GJ_RES], refToken: (_k, n) => `@image_${n}`,
       hint: "Берутся первые 15 с видео, звук сохраняется",
     },
     {
       id: "swap", label: "Замена объекта", endpoint: "higgsfield/genjutsu-light/object-swap/v1.0",
       promptRequired: false, source: { min: 1, max: 15 },
       inputs: [GJ_SOURCE, { key: "image_urls", label: "На что заменить", kind: "image", max: 8, required: true, hint: "до 8 картинок нового объекта" }],
-      params: [GJ_RES],
-      hint: "Берутся первые 15 с видео. В промпте укажите, что заменить: «замени кружку на [изображение 1]»",
+      params: [GJ_RES], refToken: (_k, n) => `@image_${n}`,
+      hint: "Берутся первые 15 с видео. В промпте укажите, что заменить: «замени кружку на @image_1»",
     },
   ],
 };
@@ -321,6 +327,32 @@ export function getModel(id: string): ModelSpec | undefined {
 export function getMode(model: ModelSpec, modeId: string): ModeSpec {
   return model.modes.find((m) => m.id === modeId) ?? model.modes[0];
 }
+// Видимый режим: скрытый (запасной) режим показывается как тот, что в него переходит
+export function visibleMode(model: ModelSpec, modeId: string): ModeSpec {
+  const m = getMode(model, modeId);
+  if (!m.hidden) return m;
+  return model.modes.find((x) => x.textFallback === m.id) ?? model.modes.find((x) => !x.hidden) ?? m;
+}
+export const firstMode = (model: ModelSpec) => model.modes.find((x) => !x.hidden) ?? model.modes[0];
+
+// Без референсов режим «Промпт и референсы» отправляется как «Текст → видео»
+export function resolveRequest(req: GenRequest): GenRequest {
+  const model = getModel(req.modelId);
+  if (!model) return req;
+  const mode = getMode(model, req.modeId);
+  if (!mode.textFallback) return req;
+  const any = mode.inputs.some((i) => (req.inputs?.[i.key] ?? []).some(Boolean));
+  if (any) return req;
+  const fb = getMode(model, mode.textFallback);
+  const params: Record<string, unknown> = {};
+  for (const p of fb.params) {
+    let v = req.params?.[p.key];
+    if (p.type === "select" && (v === undefined || !p.options.some((o) => o.value === String(v)))) v = p.default;
+    if (v !== undefined) params[p.key] = v;
+  }
+  return { ...req, modeId: fb.id, params, inputs: {} };
+}
+
 export function defaultParams(mode: ModeSpec): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const p of mode.params) {
@@ -356,6 +388,7 @@ export function validateRequest(req: GenRequest): string | null {
     if (list.length) anyInput = true;
   }
   if (mode.requireAnyInput && !anyInput) return "Добавьте хотя бы один референс";
+  if (mode.textFallback && !anyInput && !prompt) return "Введите промпт или добавьте референсы";
   if (mode.source) {
     const d = Number(req.params?.[SRC_DURATION]);
     if (Number.isFinite(d) && d > 0 && d < mode.source.min - 0.05) return `Исходное видео должно быть не короче ${mode.source.min} с`;

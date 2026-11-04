@@ -9,8 +9,9 @@ import { Icon } from "./Icon";
 import { PillPopover } from "./Popover";
 import { MediaThumb } from "./MediaInput";
 import { withBase } from "@/lib/base";
+import { favKey, useFavorites } from "./useFavorites";
 
-export type GalleryView = { layout: "masonry" | "square"; split: boolean; size: number }; // size: 0 — мельче всего … 3 — крупнее всего
+export type GalleryView = { layout: "masonry" | "square"; split: boolean; size: number; fav?: boolean }; // size: 0 — мельче всего … 3 — крупнее всего
 export type BulkItem = { id: string; indexes?: number[] };
 
 type Props = {
@@ -108,6 +109,8 @@ function useView(key: string, def: GalleryView): [GalleryView, (patch: Partial<G
 export function Gallery(p: Props) {
   const { sendToChat } = useApp();
   const [view, setView] = useView(p.viewKey, p.defaultView);
+  const fav = useFavorites();
+  const favOnly = Boolean(view.fav);
   const [open, setOpen] = useState<{ job: Job; index: number } | null>(null);
   const [refView, setRefView] = useState<string | null>(null); // какой референс открыт в окне просмотра
   useEffect(() => { setRefView(null); }, [open]);
@@ -134,13 +137,18 @@ export function Gallery(p: Props) {
     }
   }, [p.jobs]);
 
-  const cards: Card[] = useMemo(() => p.jobs.flatMap((job): Card[] =>
+  const allCards: Card[] = useMemo(() => p.jobs.flatMap((job): Card[] =>
     job.status === "completed" && job.outputs.length
       ? job.outputs.map((o, index) => ({ job, index, out: o }))
       : isTerminal(job.status)
         ? [{ job, index: 0, out: null }]
         : Array.from({ length: expectedCount(job) }, (_, index) => ({ job, index, out: null })),
   ), [p.jobs]);
+  const cards = favOnly ? allCards.filter((c) => c.out && fav.has(cardKey(c))) : allCards;
+  // В режиме «Избранное» догружаем историю целиком, чтобы показать все отмеченные
+  const { hasMore, loading: histLoading, onLoadMore } = p;
+  useEffect(() => { if (favOnly && hasMore && !histLoading) onLoadMore(); }, [favOnly, hasMore, histLoading, onLoadMore]);
+  const toggleFav = (c: { job: Job; index: number }) => fav.toggle(favKey(c.job.id, c.index)).catch((e: Error) => setNotice(e.message));
 
   // Выбирать можно готовые результаты и ошибки (их — чтобы удалить), но не то, что ещё генерируется
   const selectable = useMemo(() => cards.filter((c) => isTerminal(c.job.status)), [cards]);
@@ -220,7 +228,11 @@ export function Gallery(p: Props) {
   // Клавиши: Esc — снять выделение, Cmd/Ctrl+A — выбрать всё, Delete — удалить
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (open) { if (e.key === "Escape") { e.preventDefault(); setOpen(null); } return; }
+      if (open) {
+        if (e.key === "Escape") { e.preventDefault(); setOpen(null); }
+        else if (e.key.toLowerCase() === "f" && !inField(e.target) && !e.metaKey && !e.ctrlKey) toggleFav(open);
+        return;
+      }
       if (inField(e.target)) return;
       if (e.key === "Escape" && selecting) { clearSel(); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && selectable.length) { e.preventDefault(); selectAll(); return; }
@@ -314,9 +326,13 @@ export function Gallery(p: Props) {
               onDragStart={(e) => e.dataTransfer.setData("text/uri-list", out.url)} />
           )}
           {checkbox(c)}
+          {fav.has(key) && <span className="fav-badge" title="В избранном"><Icon name="star" size={12} className="fav-on" /></span>}
           {!selecting && (
             <>
               <div className="tile-side" onClick={(e) => e.stopPropagation()}>
+                <button className={`tbtn ${fav.has(key) ? "fav-on" : ""}`} title={fav.has(key) ? "Убрать из избранного" : "В избранное"} onClick={() => toggleFav(c)}>
+                  <Icon name="star" size={14} />
+                </button>
                 <a className="tbtn" href={out.url} download target="_blank" rel="noreferrer" title="Скачать"><Icon name="download" size={14} /></a>
                 <button className="tbtn" title={copied === job.id ? "Скопировано" : "Копировать промпт"} onClick={() => copyPrompt(job)}>
                   <Icon name={copied === job.id ? "check" : "copy"} size={14} />
@@ -380,6 +396,16 @@ export function Gallery(p: Props) {
             {sel.size < selectable.length && <button className="pill" onClick={selectAll} title="Cmd/Ctrl + A"><Icon name="selectall" size={15} />Выбрать все</button>}
             <span className="gbar-grow" />
             {busy && <span className="gbar-busy"><span className="spinner" />{busy}</span>}
+            {(() => {
+              const outs = selectedCards.filter((c) => c.out);
+              if (!outs.length) return null;
+              const allFav = outs.every((c) => fav.has(cardKey(c)));
+              return (
+                <button className="pill" disabled={Boolean(busy)} onClick={() => fav.set(outs.map(cardKey), !allFav).catch((e: Error) => setNotice(e.message))}>
+                  <Icon name="star" size={15} className={allFav ? "fav-on" : ""} />{allFav ? "Убрать из избранного" : "В избранное"}
+                </button>
+              );
+            })()}
             <button className="pill" disabled={Boolean(busy) || !selectedCards.some((c) => c.out)} onClick={downloadSelected}>
               <Icon name="download" size={15} />{selectedCards.filter((c) => c.out).length > 1 ? "Скачать архивом" : "Скачать"}
             </button>
@@ -388,6 +414,9 @@ export function Gallery(p: Props) {
         ) : (
           <>
             {notice && <span className="gbar-note">{notice}</span>}
+            <button className={`pill ${favOnly ? "on" : ""}`} onClick={() => { clearSel(); setView({ fav: !favOnly }); }} title="Показать только избранное">
+              <Icon name="star" size={15} className={favOnly ? "fav-on" : ""} />Избранное{fav.size ? <span className="muted"> {fav.size}</span> : null}
+            </button>
             <span className="gbar-grow" />
             {selectable.length > 0 && (
               <button className="pill" onClick={() => setSelMode(true)} title="Выделить несколько (или Cmd/Ctrl + клик по карточке)">
@@ -427,7 +456,13 @@ export function Gallery(p: Props) {
         )}
       </div>
 
-      {!p.loading && p.jobs.length === 0 && (
+      {favOnly && !p.loading && !p.hasMore && cards.length === 0 && (
+        <div className="empty">
+          <img src={withBase("/assets/empty.webp")} alt="" draggable={false} />
+          <div>В избранном пока пусто — отмечайте результаты звёздочкой</div>
+        </div>
+      )}
+      {!favOnly && !p.loading && p.jobs.length === 0 && (
         <div className="empty">
           <img src={withBase("/assets/empty.webp")} alt="" draggable={false} />
           <div>{p.emptyText}</div>
@@ -501,6 +536,10 @@ export function Gallery(p: Props) {
                   ))}
                 </div>
                 <div className="col gap8">
+                  <button className={`btn ${fav.has(favKey(open.job.id, open.index)) ? "fav-btn on" : "fav-btn"}`} onClick={() => toggleFav(open)} title="Клавиша F">
+                    <Icon name="star" size={14} className={fav.has(favKey(open.job.id, open.index)) ? "fav-on" : ""} />
+                    {fav.has(favKey(open.job.id, open.index)) ? " В избранном" : " В избранное"}
+                  </button>
                   <button className="btn" onClick={() => { p.onReuse(open.job); setOpen(null); }}><Icon name="reuse" size={14} /> Повторить настройки</button>
                   {p.onUseAsInput && curIsImage && (
                     <button className="btn" onClick={() => { p.onUseAsInput!(curUrl); setOpen(null); }}><Icon name="image" size={14} /> Как референс</button>

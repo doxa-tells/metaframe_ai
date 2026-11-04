@@ -40,15 +40,15 @@ export function VideoPanel(p: Props) {
 
   const singles = p.mode.inputs.filter((s) => s.max === 1);
   const multis = p.mode.inputs.filter((s) => s.max > 1);
-  const isKling = p.model.id.startsWith("kling");
+  const tabs = p.model.modes.filter((m) => !m.hidden);
 
-  // Подстановка ссылок на референсы в промпт
+  // Подстановка ссылок на референсы в промпт — в синтаксисе конкретной модели
   const refTokens: { token: string; label: string }[] = [];
-  for (const s of multis) {
+  const tokenOf = p.mode.refToken;
+  if (tokenOf) for (const s of multis) {
     valueOf(s).forEach((_, i) => {
       const n = i + 1;
-      if (isKling) refTokens.push({ token: `@${s.kind}_${n}`, label: `${s.kind === "image" ? "Изображение" : "Видео"} ${n}` });
-      else refTokens.push({ token: `[${s.kind === "image" ? "изображение" : s.kind === "video" ? "видео" : "аудио"} ${n}]`, label: `${s.kind === "image" ? "Изображение" : s.kind === "video" ? "Видео" : "Аудио"} ${n}` });
+      refTokens.push({ token: tokenOf(s.kind, n), label: `${s.kind === "image" ? "Изображение" : s.kind === "video" ? "Видео" : "Аудио"} ${n}` });
     });
   }
   function insertToken(t: string) {
@@ -130,7 +130,14 @@ export function VideoPanel(p: Props) {
             <button className="vx" onClick={(e) => { e.stopPropagation(); p.onInput(s.key, []); }} aria-label="Убрать"><Icon name="x" size={12} /></button>
           </>
         ) : (
-          <div className="vslot-empty"><Icon name="plus" size={18} /></div>
+          <>
+            <div className="vslot-empty"><Icon name="plus" size={18} /></div>
+            {up.canLibrary(s) && (
+              <button type="button" className="vslot-lib" title="Из своих генераций" onClick={(e) => { e.stopPropagation(); up.pickLibrary(s); }}>
+                <Icon name="library" size={14} />
+              </button>
+            )}
+          </>
         )}
         <span className="vslot-label">{s.label}{s.required ? " *" : ""}{v && s.key === "video_url" && srcDur ? ` · ${Math.round(srcDur)} с` : ""}</span>
       </div>
@@ -199,9 +206,9 @@ export function VideoPanel(p: Props) {
 
   return (
     <aside className="vpanel">
-      {p.model.modes.length > 1 && (
+      {tabs.length > 1 && (
         <div className="vtabs">
-          {p.model.modes.map((m) => (
+          {tabs.map((m) => (
             <button key={m.id} className={m.id === p.mode.id ? "on" : ""} onClick={() => p.onMode(m.id)} title={m.label}>
               <img className="tabicon" src={modeIcon(m.id)} alt="" draggable={false} />{m.label.split(" → ")[0]}
             </button>
@@ -246,11 +253,18 @@ export function VideoPanel(p: Props) {
               onDragLeave={() => setDragKey(null)}
               onDrop={(e) => { setDragKey(null); up.onDrop(e); }}>
               {all.length === 0 && pend.length === 0 ? (
+                <div className="vdrop-empty-wrap">
                 <button className="vdrop-empty" onClick={() => up.pickAny()}>
                   <span className="vdrop-icons">{multis.map((s) => <span key={s.key}><Icon name={KIND_ICON[s.kind]} size={16} /></span>)}</span>
                   <b>{multis.length > 1 ? "Добавить референсы" : multis[0].label}</b>
-                  <span className="muted small">{multis.length > 1 ? multis.map((s) => s.label.split(" (")[0]).join(", ") : multis[0].hint ?? `до ${multis[0].max} файлов`}</span>
+                  <span className="muted small">{p.mode.textFallback ? "необязательно — без них видео строится по промпту" : multis.length > 1 ? multis.map((s) => s.label.split(" (")[0]).join(", ") : multis[0].hint ?? `до ${multis[0].max} файлов`}</span>
                 </button>
+                {up.canLibrary() && (
+                  <button type="button" className="vdrop-lib" onClick={() => up.pickLibrary(multis.length === 1 ? multis[0] : undefined)}>
+                    <Icon name="library" size={14} /> Из генераций
+                  </button>
+                )}
+                </div>
               ) : (
                 <>
                   <div className="vdrop-head"><span>{multis.length > 1 ? "Референсы" : multis[0].label}</span><span className="muted small">{all.length + pend.length}/{total}</span></div>
@@ -269,6 +283,9 @@ export function VideoPanel(p: Props) {
                       </div>
                     ))}
                     {all.length + pend.length < total && <button className="vthumb add" onClick={() => up.pickAny()}><Icon name="plus" size={16} /></button>}
+                    {all.length + pend.length < total && up.canLibrary() && (
+                      <button className="vthumb add" title="Из своих генераций" onClick={() => up.pickLibrary(multis.length === 1 ? multis[0] : undefined)}><Icon name="library" size={16} /></button>
+                    )}
                   </div>
                 </>
               )}
@@ -280,7 +297,7 @@ export function VideoPanel(p: Props) {
           <div className="vprompt-label">Промпт</div>
           <textarea ref={taRef} value={p.prompt} rows={5}
             placeholder={p.mode.id === "reference"
-              ? `Опишите видео и роль каждого референса${isKling ? " — ссылайтесь на них через @" : ""}…`
+              ? (refTokens.length ? `Опишите видео и роль каждого референса — ${refTokens[0].token}…` : "Опишите сцену, действие, камеру и звук. Референсы — по желанию…")
               : p.mode.id === "image" ? "Опишите действие и движение камеры от первого кадра…"
               : p.mode.id === "swap" ? "Что заменить и на что: «замени кружку в руке на [изображение 1]»…"
               : p.mode.id === "motion" ? "Необязательно: уточните, кто из картинок кого играет и где…"

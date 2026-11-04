@@ -736,3 +736,48 @@ input:focus, select:focus, textarea:focus { border-color: #2b4c5b; }
 .preset img, .preset video, .preset-ph { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 7px; background: #0b1820; display: block; }
 .preset span { font-size: 11.5px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 2px 2px; }
 @media (max-width: 760px) { .preset-grid { max-height: none; } }
+/* Избранное */
+.fav-on path { fill: #ffd34d; stroke: #ffd34d; }
+.tbtn.fav-on { color: #ffd34d; }
+.fav-badge { position: absolute; left: 8px; bottom: 8px; width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; background: rgba(0,0,0,.55); pointer-events: none; z-index: 2; }
+.tile-inner:hover .fav-badge { opacity: 0; }
+.btn.fav-btn.on { border-color: rgba(255,211,77,.45); color: #ffe08a; }
+.gbar .pill.on .muted { color: inherit; opacity: .7; }
+
+/* Окно «Из генераций» */
+.lib-bg { z-index: 120; }
+.lib { width: min(860px, 100%); height: min(680px, 88vh); display: flex; flex-direction: column; background: var(--pop); border: 1px solid var(--line2); border-radius: 18px; overflow: hidden; }
+.lib-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.lib-head > b { font-family: var(--font-head); font-weight: 400; font-size: 15px; letter-spacing: .04em; }
+.lib-tabs { flex: 1; display: flex; gap: 4px; }
+.lib-tabs button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid transparent; background: none; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; }
+.lib-tabs button:hover { color: var(--text); background: var(--hover); }
+.lib-tabs button.on { color: var(--text); background: var(--surface); border-color: var(--line2); }
+.lib-tabs button:not(.on) .fav-on path { fill: none; stroke: currentColor; }
+.lib-grid { flex: 1; overflow-y: auto; padding: 12px; display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); grid-auto-rows: max-content; gap: 8px; align-content: start; }
+.lib-item { position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--surface); padding: 0; cursor: pointer; }
+.lib-item img, .lib-item video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lib-item:hover { border-color: var(--line2); }
+.lib-item.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+.lib-item.on img, .lib-item.on video { opacity: .8; }
+.lib-n { position: absolute; top: 6px; right: 6px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: #001018; font-size: 12px; display: grid; place-items: center; }
+.lib-fav, .lib-play { position: absolute; left: 6px; width: 20px; height: 20px; border-radius: 999px; background: rgba(0,0,0,.55); display: grid; place-items: center; color: #fff; }
+.lib-fav { top: 6px; }
+.lib-play { bottom: 6px; }
+.lib-empty { grid-column: 1 / -1; display: grid; place-items: center; padding: 30px 10px; text-align: center; font-size: 13px; }
+.lib-foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.lib-foot > span { flex: 1; }
+.vslot-lib { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--surface); border: 1px solid var(--line2); color: var(--muted); cursor: pointer; z-index: 2; }
+.vslot-lib:hover { color: var(--accent); border-color: var(--accent); }
+.vdrop-empty-wrap { display: flex; flex-direction: column; align-items: stretch; }
+.vdrop-lib { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin: -4px 0 10px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line2); background: var(--surface); color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+.vdrop-lib:hover { color: var(--accent); border-color: var(--accent); }
+@media (max-width: 760px) {
+  .modal-bg.lib-bg { padding: 0; place-items: stretch; }
+  .lib { width: 100%; height: 100%; border-radius: 0; border: 0; }
+  .lib-head { flex-wrap: wrap; padding-top: max(12px, env(safe-area-inset-top)); }
+  .lib-tabs { order: 3; flex-basis: 100%; }
+  .lib-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 8px; }
+  .lib-foot { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+}
+.lib-head .iconbtn { margin-left: auto; }

@@ -142,3 +142,7 @@ export function listPresetsApi(path: string): Promise<Preset[]> {
   }
   return presetCache.get(path)!;
 }
+
+export const getFavoritesApi = () => api<{ keys: string[] }>("/api/favorites").then((r) => r.keys);
+export const setFavoritesApi = (keys: string[], on: boolean) =>
+  api<{ keys: string[] }>("/api/favorites", { method: "POST", body: JSON.stringify({ keys, on }) }).then((r) => r.keys);

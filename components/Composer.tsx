@@ -194,6 +194,12 @@ export function Composer(p: Props) {
             </PillPopover>
           )}
 
+          {p.mode.inputs.length > 0 && up.canLibrary() && (
+            <button type="button" className="pill icon" onClick={() => up.pickLibrary(p.mode.inputs.length === 1 ? p.mode.inputs[0] : undefined)} title="Добавить из своих генераций">
+              <Icon name="library" size={16} />
+            </button>
+          )}
+
           <PillPopover width={330} title="Модель"
             label={<><img className="pill-emblem" src={emblemFor(p.model.id)} alt="" draggable={false} /><span className="pill-model">{p.model.name}</span><Icon name="chevron" size={13} /></>}>
             {(close) => (

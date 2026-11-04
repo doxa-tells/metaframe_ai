@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { InputSpec, ModeSpec } from "@/lib/models";
 import { uploadFile } from "@/lib/client";
 import { useApp } from "./AppContext";
+import { LibraryPicker, type LibItem } from "./LibraryPicker";
 
 const ACCEPT: Record<string, string> = {
   image: "image/png,image/jpeg,image/webp,image/gif",
@@ -24,6 +25,7 @@ export function useUploader(mode: ModeSpec, inputs: Record<string, string[]>, on
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  const [lib, setLib] = useState<{ spec: InputSpec | null } | null>(null);
 
   // Актуальные значения для асинхронных загрузок (иначе параллельные загрузки затирают друг друга)
   const latest = useRef(inputs);
@@ -106,6 +108,34 @@ export function useUploader(mode: ModeSpec, inputs: Record<string, string[]>, on
     if (!s) { setError("В этом режиме нельзя добавить этот файл"); return false; }
     onInput(s.key, s.max === 1 ? [url] : [...valueOf(s), url].slice(0, s.max));
     return true;
+  }
+
+  // Готовые URL (например, из своих генераций) — раскладываются по входам нужного типа
+  function addUrls(list: LibItem[], spec?: InputSpec) {
+    setError(null);
+    const next: Record<string, string[]> = {};
+    const cur = (s: InputSpec) => next[s.key] ?? liveValue(s.key);
+    for (const it of list) {
+      const s = spec ?? mode.inputs.find((x) => x.kind === it.type && cur(x).length + reserved(x.key) < x.max)
+        ?? mode.inputs.find((x) => x.kind === it.type && x.max === 1);
+      if (!s) { setError(`В этом режиме нельзя добавить ${it.type === "image" ? "изображение" : "видео"}`); continue; }
+      if (s.max === 1) next[s.key] = [it.url];
+      else if (!cur(s).includes(it.url)) next[s.key] = [...cur(s), it.url].slice(0, s.max);
+    }
+    for (const [k, v] of Object.entries(next)) onInput(k, v);
+  }
+
+  const libKinds = (spec: InputSpec | null) => [...new Set((spec ? [spec] : mode.inputs).map((s) => s.kind))]
+    .filter((k): k is "image" | "video" => k === "image" || k === "video");
+  const canLibrary = (spec?: InputSpec) => libKinds(spec ?? null).length > 0;
+  function pickLibrary(spec?: InputSpec) {
+    if (canLibrary(spec)) setLib({ spec: spec ?? null });
+  }
+  function libRoom(spec: InputSpec | null): number {
+    if (spec) return spec.max === 1 ? 1 : Math.max(1, spec.max - valueOf(spec).length - reserved(spec.key));
+    const kinds = libKinds(null);
+    const room = mode.inputs.filter((s) => (kinds as string[]).includes(s.kind)).reduce((n, s) => n + Math.max(0, s.max - valueOf(s).length - reserved(s.key)), 0);
+    return Math.max(1, room);
   }
 
   // Перестановка: внутри одного входа — сдвиг, между одиночными слотами одного типа — обмен
@@ -191,14 +221,20 @@ export function useUploader(mode: ModeSpec, inputs: Record<string, string[]>, on
   }
 
   const fileInput = (
-    <input ref={fileRef} type="file" hidden onChange={(e) => {
-      const files = Array.from(e.target.files ?? []);
-      e.target.value = "";
-      if (files.length) addFiles(files, target.current ?? undefined);
-    }} />
+    <>
+      <input ref={fileRef} type="file" hidden onChange={(e) => {
+        const files = Array.from(e.target.files ?? []);
+        e.target.value = "";
+        if (files.length) addFiles(files, target.current ?? undefined);
+      }} />
+      {lib && (
+        <LibraryPicker kinds={libKinds(lib.spec)} max={libRoom(lib.spec)} onClose={() => setLib(null)}
+          onPick={(items) => addUrls(items, lib.spec ?? undefined)} />
+      )}
+    </>
   );
 
   const isRefDrag = (e: React.DragEvent) => e.dataTransfer.types.includes(REF_MIME);
 
-  return { valueOf, addFiles, pick, pickAny, onDrop, dragProps, isRefDrag, pending, uploading: pending.length, error, setError, fileInput };
+  return { valueOf, addFiles, addUrls, pickLibrary, canLibrary, pick, pickAny, onDrop, dragProps, isRefDrag, pending, uploading: pending.length, error, setError, fileInput };
 }

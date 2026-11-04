@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "crypto";
 import {
-  GenRequest, Kind, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, ARK_MODEL_IDS,
+  GenRequest, Kind, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, resolveRequest, ARK_MODEL_IDS,
 } from "./models";
 import { describeNetError } from "./net";
 import { putFile, putJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, localKeyOf, StoredItem } from "./storage";
@@ -122,16 +122,18 @@ async function runSync(base: JobRecord, work: () => Promise<Partial<JobRecord>>)
   return rec;
 }
 
-export async function createJob(req: GenRequest, origin: string): Promise<JobRecord> {
-  const err = validateRequest(req);
+export async function createJob(asked: GenRequest, origin: string): Promise<JobRecord> {
+  const err = validateRequest(asked);
   if (err) throw new hf.ProviderError(err, 400);
+  // В записи задачи остаётся режим, выбранный в интерфейсе; провайдеру уходит фактический
+  const req = resolveRequest(asked);
   const model = getModel(req.modelId)!;
-  const mode = getMode(model, req.modeId);
+  const mode = getMode(model, asked.modeId);
   const id = newJobId(model.kind);
   const base: JobRecord = {
     id, kind: model.kind, modelId: model.id, modeId: mode.id,
-    prompt: (req.prompt ?? "").trim(), params: req.params ?? {}, inputs: req.inputs ?? {},
-    cost: estimateCost(req), provider: MOCK ? "mock" : model.provider,
+    prompt: (asked.prompt ?? "").trim(), params: asked.params ?? {}, inputs: asked.inputs ?? {},
+    cost: estimateCost(asked), provider: MOCK ? "mock" : model.provider,
     status: "queued", outputs: [], createdAt: Date.now(),
   };
 
