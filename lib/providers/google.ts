@@ -73,7 +73,9 @@ async function nanoBananaOnce(p: NanoParams): Promise<{ data: Buffer; mimeType: 
     const said = candidates.flatMap((c) => ((c.content as Record<string, unknown> | undefined)?.parts ?? []) as Record<string, unknown>[])
       .filter((x) => typeof x.text === "string" && !x.thought).map((x) => String(x.text)).join(" ").trim().slice(0, 220);
     const reason = block ? `заблокировано (${block})` : finish && finish !== "STOP" ? finish : said ? `модель ответила текстом: «${said}»` : "пустой ответ";
-    throw Object.assign(new ProviderError(`Gemini не вернул изображение — ${reason}`, 422), { noImage: !block });
+    // Повторять имеет смысл только «пустой» ответ; отказ фильтра повторится и снова будет стоить денег
+    const censored = Boolean(block) || /SAFETY|PROHIBITED|BLOCKLIST|SPII|RECITATION/.test(finish ?? "");
+    throw Object.assign(new ProviderError(`Gemini не вернул изображение — ${reason}`, 422), { noImage: !censored });
   }
   return out;
 }

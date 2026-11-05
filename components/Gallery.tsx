@@ -4,12 +4,14 @@ import { createPortal } from "react-dom";
 import { getModel, formatUsd } from "@/lib/models";
 import { ensureThumbsApi, isTerminal, STATUS_LABEL, thumbOf, timeAgo, type Job, type JobOutput } from "@/lib/client";
 import { downloadItems, downloadOriginal, fileNameFor } from "@/lib/archive";
+import { humanizeError } from "@/lib/errors";
 import { useApp } from "./AppContext";
 import { Icon } from "./Icon";
 import { PillPopover } from "./Popover";
 import { MediaThumb } from "./MediaInput";
 import { withBase } from "@/lib/base";
 import { favKey, useFavorites } from "./useFavorites";
+import { ZoomImage } from "./ZoomImage";
 
 export type GalleryView = { layout: "masonry" | "square"; split: boolean; size: number; fav?: boolean }; // size: 0 — мельче всего … 3 — крупнее всего
 export type BulkItem = { id: string; indexes?: number[] };
@@ -151,6 +153,26 @@ export function Gallery(p: Props) {
   // В режиме «Избранное» догружаем историю целиком, чтобы показать все отмеченные
   const { hasMore, loading: histLoading, onLoadMore } = p;
   useEffect(() => { if (favOnly && hasMore && !histLoading) onLoadMore(); }, [favOnly, hasMore, histLoading, onLoadMore]);
+  // Листание в окне просмотра: по готовым результатам в порядке галереи
+  const viewable = useMemo(() => cards.filter((c) => c.out), [cards]);
+  const openPos = open ? viewable.findIndex((c) => c.job.id === open.job.id && c.index === open.index) : -1;
+  const zoomCtl = useRef<{ zoomed: boolean; reset: () => void } | null>(null);
+  const go = (delta: 1 | -1) => {
+    if (openPos < 0) return;
+    const next = viewable[openPos + delta];
+    if (!next) return;
+    setRefView(null);
+    setOpen({ job: next.job, index: next.index });
+    if (delta > 0 && openPos + 3 >= viewable.length && p.hasMore && !p.loading) p.onLoadMore();
+  };
+  // Соседние оригиналы подгружаем заранее, чтобы стрелки листали без ожидания
+  useEffect(() => {
+    if (openPos < 0) return;
+    for (const c of [viewable[openPos + 1], viewable[openPos - 1]]) {
+      if (c?.out?.type === "image") { const im = new Image(); im.src = c.out.url; }
+    }
+  }, [openPos, viewable]);
+
   async function saveOne(job: Job, index: number, url: string) {
     setBusy("Скачиваю…");
     try { await downloadOriginal(url, fileNameFor(job.prompt, job.createdAt, index, url, new Set())); }
@@ -253,7 +275,13 @@ export function Gallery(p: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (open) {
-        if (e.key === "Escape") { e.preventDefault(); setOpen(null); }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          if (zoomCtl.current?.zoomed) zoomCtl.current.reset();
+          else if (refView) setRefView(null);
+          else setOpen(null);
+        }
+        else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !inField(e.target)) { e.preventDefault(); go(e.key === "ArrowRight" ? 1 : -1); }
         else if (e.key.toLowerCase() === "f" && !inField(e.target) && !e.metaKey && !e.ctrlKey) toggleFav(open);
         return;
       }
@@ -315,7 +343,17 @@ export function Gallery(p: Props) {
                 <div className="tiny-text muted">{model?.name}</div>
               </>
             ) : (
-              <div className="err-box small">{STATUS_LABEL[job.status]}{job.error ? `: ${job.error}` : ""}</div>
+              (() => {
+                const h = humanizeError(job.status, job.error);
+                return (
+                  <div className={`fail fail-${h.kind}`} title={h.raw ? `Ответ провайдера: ${h.raw}` : undefined}>
+                    <b>{h.title}</b>
+                    <span>{h.text}</span>
+                    {h.hint && <em>{h.hint}</em>}
+                    <i className="tiny-text muted">{model?.name}</i>
+                  </div>
+                );
+              })()
             )}
             {!pending && checkbox(c)}
             {!selecting && (
@@ -527,11 +565,20 @@ export function Gallery(p: Props) {
                   <>
                     {viewing.kind === "video" ? <video key={viewing.url} src={viewing.url} controls autoPlay loop playsInline />
                       : viewing.kind === "audio" ? <audio key={viewing.url} src={viewing.url} controls autoPlay className="lb-audio" />
-                      : <img key={viewing.url} src={viewing.url} alt="" />}
+                      : <ZoomImage key={viewing.url} src={viewing.url} zoomRef={zoomCtl} />}
                     <button className="pill lb-back" onClick={() => setRefView(null)}><Icon name="reuse" size={14} />К результату</button>
                     <span className="lb-viewing">Референс · {viewing.label}</span>
                   </>
-                ) : out.type === "video" ? <video src={out.url} controls autoPlay loop playsInline /> : <img src={out.url} alt="" />}
+                ) : out.type === "video" ? <video key={out.url} src={out.url} controls autoPlay loop playsInline />
+                  : <ZoomImage src={out.url} placeholder={out.thumb && out.thumb !== "-" ? out.thumb : undefined} onSwipe={go} zoomRef={zoomCtl} />}
+                {!viewing && (
+                  <>
+                    <button className="pill lb-backbtn" onClick={() => setOpen(null)} title="Назад (Esc)"><Icon name="back" size={15} />Назад</button>
+                    {openPos > 0 && <button className="lb-nav prev" onClick={() => go(-1)} title="Предыдущее (←)" aria-label="Предыдущее"><Icon name="left" size={22} /></button>}
+                    {openPos >= 0 && openPos < viewable.length - 1 && <button className="lb-nav next" onClick={() => go(1)} title="Следующее (→)" aria-label="Следующее"><Icon name="right" size={22} /></button>}
+                    {viewable.length > 1 && openPos >= 0 && <span className="lb-count">{openPos + 1} / {viewable.length}{p.hasMore ? "+" : ""}</span>}
+                  </>
+                )}
               </div>
               <div className="lightbox-side">
                 <div className="row between">
