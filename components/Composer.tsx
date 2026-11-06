@@ -8,6 +8,7 @@ import { OptionList, PillPopover } from "./Popover";
 import { ParamControls } from "./ParamControls";
 import { SoulIdPicker } from "./SoulIdPicker";
 import { MediaThumb } from "./MediaInput";
+import { useRefViewer } from "./RefViewer";
 import { useUploader } from "./useUploader";
 import { emblemFor } from "@/lib/brand";
 
@@ -43,6 +44,10 @@ export function Composer(p: Props) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [drag, setDrag] = useState(false);
   const up = useUploader(p.mode, p.inputs, p.onInput);
+  const refViewer = useRefViewer();
+  const refList = () => p.mode.inputs.flatMap((s) => valueOf(s).map((u, i) => ({
+    key: s.key, url: u, kind: s.kind, label: s.max === 1 ? s.label : `${s.label} ${i + 1}`,
+  })));
   const { valueOf, uploading, pick } = up;
 
   // Автовысота поля промпта
@@ -148,12 +153,14 @@ export function Composer(p: Props) {
       {hasThumbs && (
         <div className="comp-thumbs">
           {p.mode.inputs.map((s) => valueOf(s).map((u, i) => (
-            <div key={s.key + u + i} className="comp-thumb" title={`${s.label} — перетащите, чтобы поменять порядок`} {...up.dragProps(s, i)}>
+            <div key={s.key + u + i} className="comp-thumb" title={`${s.label} — нажмите, чтобы открыть; перетащите, чтобы поменять порядок`} {...up.dragProps(s, i)}
+              onClick={() => { const all = refList(); refViewer.show(all, Math.max(0, all.findIndex((r) => r.url === u && r.key === s.key))); }}>
               <MediaThumb url={u} kind={s.kind} />
               <span className="tag">{s.max === 1 ? s.label : `${s.kind === "image" ? "" : s.kind === "video" ? "▶ " : "♪ "}${i + 1}`}</span>
-              <button type="button" onClick={() => p.onInput(s.key, valueOf(s).filter((_, j) => j !== i))} aria-label="Убрать"><Icon name="x" size={11} /></button>
+              <button type="button" onClick={(e) => { e.stopPropagation(); p.onInput(s.key, valueOf(s).filter((_, j) => j !== i)); }} aria-label="Убрать"><Icon name="x" size={11} /></button>
             </div>
           )))}
+          {refViewer.viewer}
           {up.pending.map((f) => (
             <div key={f.id} className="comp-thumb loading">
               {f.kind === "image" && <img src={f.preview} alt="" draggable={false} />}

@@ -828,3 +828,9 @@ input:focus, select:focus, textarea:focus { border-color: #2b4c5b; }
 }
 .lb-prompt, .lb-params, .lb-refs { flex-shrink: 0; }
 @media (max-width: 760px) { .lb-close { display: none !important; } }
+/* Просмотр своих референсов */
+.refview { position: relative; width: min(1100px, 100%); height: min(86vh, 900px); display: flex; background: #000; border: 1px solid var(--line2); border-radius: 16px; overflow: hidden; }
+.refview .lightbox-media { flex: 1; }
+.comp-thumb, .vthumb:not(.add):not(.loading), .vslot.filled { cursor: zoom-in; }
+@media (max-width: 760px) { .refview { width: 100%; height: 100%; border-radius: 0; border: none; } }
+.load-sentinel { height: 1px; width: 100%; }

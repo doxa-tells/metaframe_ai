@@ -98,6 +98,13 @@ export function Studio({ kind }: { kind: Kind }) {
     }
   }, [kind]);
   useEffect(() => { rememberJobs(kind, jobs, cursor); }, [kind, jobs, cursor]);
+  // Одна и та же страница не запрашивается дважды (прокрутка может звать подгрузку несколько раз)
+  const inFlight = useRef<string | null>(null);
+  const loadMore = useCallback(() => {
+    if (!cursor || inFlight.current === cursor) return;
+    inFlight.current = cursor;
+    load(cursor).finally(() => { inFlight.current = null; });
+  }, [cursor, load]);
   const mergeJobs = useCallback((upd: Job[]) => {
     const map = new Map(upd.map((j) => [j.id, j]));
     setJobs((prev) => prev.map((j) => map.get(j.id) ?? j));
@@ -225,7 +232,7 @@ export function Studio({ kind }: { kind: Kind }) {
         : { layout: "square", split: true, size: 0 }}
       loading={loading}
       hasMore={Boolean(cursor)}
-      onLoadMore={() => load(cursor)}
+      onLoadMore={loadMore}
       onReuse={reuse}
       onJobsUpdated={mergeJobs}
       onUseAsInput={kind === "image" ? useAsInput : undefined}

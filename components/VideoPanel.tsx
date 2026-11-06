@@ -7,6 +7,7 @@ import { useApp } from "./AppContext";
 import { Icon } from "./Icon";
 import { OptionList, PillPopover } from "./Popover";
 import { MediaThumb } from "./MediaInput";
+import { useRefViewer } from "./RefViewer";
 import { useUploader } from "./useUploader";
 import { emblemFor, emblemWhiteFor, heroFor, modeIcon } from "@/lib/brand";
 
@@ -34,6 +35,11 @@ const KIND_ICON: Record<string, string> = { image: "image", video: "video", audi
 export function VideoPanel(p: Props) {
   const { sendToChat } = useApp();
   const up = useUploader(p.mode, p.inputs, p.onInput);
+  const refViewer = useRefViewer();
+  const refList = () => p.mode.inputs.flatMap((s) => valueOf(s).map((u, i) => ({
+    key: s.key, url: u, kind: s.kind, label: s.max === 1 ? s.label : `${s.label.split(" (")[0]} ${i + 1}`,
+  })));
+  const openRef = (key: string, url: string) => { const all = refList(); refViewer.show(all, Math.max(0, all.findIndex((r) => r.url === url && r.key === key))); };
   const { valueOf } = up;
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -118,7 +124,7 @@ export function VideoPanel(p: Props) {
         onDragOver={(e) => { e.preventDefault(); setDragKey(s.key); }}
         onDragLeave={() => setDragKey(null)}
         onDrop={(e) => { setDragKey(null); up.onDrop(e, s); }}
-        onClick={() => !v && up.pick(s)}>
+        onClick={() => (v ? openRef(s.key, v) : up.pick(s))}>
         {pend ? (
           <>
             {pend.kind === "image" ? <img className="pend" src={pend.preview} alt="" draggable={false} /> : <video className="pend" src={pend.preview} muted draggable={false} />}
@@ -270,10 +276,11 @@ export function VideoPanel(p: Props) {
                   <div className="vdrop-head"><span>{multis.length > 1 ? "Референсы" : multis[0].label}</span><span className="muted small">{all.length + pend.length}/{total}</span></div>
                   <div className="vthumbs">
                     {all.map(({ s, u, i }) => (
-                      <div key={s.key + u + i} className="vthumb" title={`${s.label} — перетащите, чтобы поменять порядок`} {...up.dragProps(s, i)}>
+                      <div key={s.key + u + i} className="vthumb" title={`${s.label} — нажмите, чтобы открыть; перетащите, чтобы поменять порядок`} {...up.dragProps(s, i)}
+                        onClick={() => openRef(s.key, u)}>
                         <MediaThumb url={u} kind={s.kind} />
                         <span className="tag">{s.kind === "image" ? "Ф" : s.kind === "video" ? "В" : "А"}{i + 1}</span>
-                        <button onClick={() => p.onInput(s.key, valueOf(s).filter((_, j) => j !== i))} aria-label="Убрать"><Icon name="x" size={11} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); p.onInput(s.key, valueOf(s).filter((_, j) => j !== i)); }} aria-label="Убрать"><Icon name="x" size={11} /></button>
                       </div>
                     ))}
                     {pend.map((f) => (
@@ -337,6 +344,7 @@ export function VideoPanel(p: Props) {
         <div className="muted tiny-text">{p.model.priceNote}</div>
       </div>
       {up.fileInput}
+      {refViewer.viewer}
     </aside>
   );
 }

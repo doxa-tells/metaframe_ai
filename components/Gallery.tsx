@@ -152,6 +152,18 @@ export function Gallery(p: Props) {
     [allCards, favOnly, fav.rev]);
   // В режиме «Избранное» догружаем историю целиком, чтобы показать все отмеченные
   const { hasMore, loading: histLoading, onLoadMore } = p;
+  // Бесконечная прокрутка: следующая страница подгружается заранее, примерно за два экрана до конца
+  const sentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasMore || histLoading) return;
+    let root: HTMLElement | null = el.parentElement;
+    while (root && !/(auto|scroll)/.test(getComputedStyle(root).overflowY)) root = root.parentElement;
+    const io = new IntersectionObserver((ents) => { if (ents.some((x) => x.isIntersecting)) onLoadMore(); },
+      { root, rootMargin: "0px 0px 1600px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, histLoading, onLoadMore, cards.length]);
   useEffect(() => { if (favOnly && hasMore && !histLoading) onLoadMore(); }, [favOnly, hasMore, histLoading, onLoadMore]);
   // Листание в окне просмотра: по готовым результатам в порядке галереи
   const viewable = useMemo(() => cards.filter((c) => c.out), [cards]);
@@ -533,7 +545,7 @@ export function Gallery(p: Props) {
       )}
       {body}
       {p.loading && <div className="center pad"><div className="spinner" /></div>}
-      {p.hasMore && !p.loading && <div className="center pad"><button className="btn" onClick={p.onLoadMore}>Показать ещё</button></div>}
+      {p.hasMore && <div ref={sentinel} className="load-sentinel" aria-hidden />}
 
       {open && (() => {
         const out = open.job.outputs[open.index];
