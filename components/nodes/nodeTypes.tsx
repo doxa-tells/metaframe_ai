@@ -169,7 +169,7 @@ export function VideoGenNode({ id, data, selected }: NodeProps<FlowNode>) {
       <label className="mini-field nodrag">
         <span>Модель</span>
         <select value={modelId} onChange={(e) => updateNodeData(id, { modelId: e.target.value, params: {} })}>
-          {MODELS.filter((m) => m.kind === "video" && !m.modes.some((x) => x.source)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          {MODELS.filter((m) => m.kind === "video" && !m.modes.some((x) => x.source) && m.id !== "seedance-2.5-hf").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
       </label>
       <div className="mini-grid">

@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { InputSpec, ModeSpec, ModelSpec, ParamSpec } from "@/lib/models";
 import { formatUsd, SRC_DURATION } from "@/lib/models";
-import { listPresetsApi, type Preset } from "@/lib/client";
+import { listPresetsApi, precheckApi, type Preset } from "@/lib/client";
 import { useApp } from "./AppContext";
 import { Icon } from "./Icon";
 import { OptionList, PillPopover } from "./Popover";
@@ -40,6 +40,50 @@ export function VideoPanel(p: Props) {
     key: s.key, url: u, kind: s.kind, label: s.max === 1 ? s.label : `${s.label.split(" (")[0]} ${i + 1}`,
   })));
   const openRef = (key: string, url: string) => { const all = refList(); refViewer.show(all, Math.max(0, all.findIndex((r) => r.url === url && r.key === key))); };
+
+  // Seedance: каждый реф проверяем заранее на модерацию BytePlus (реальные лица, копирайт).
+  // Не прошедший — сразу убираем с понятным объяснением, а не после генерации.
+  const needsPrecheck = p.model.provider === "byteplus" && p.model.kind === "video";
+  const [checks, setChecks] = useState<Record<string, "checking" | "ok" | "skip">>({});
+  const [retryTick, setRetryTick] = useState(0);
+  const [rejected, setRejected] = useState<string | null>(null);
+  const checksRef = useRef(checks);
+  checksRef.current = checks;
+  const inputsRef = useRef(p.inputs);
+  inputsRef.current = p.inputs;
+  const onInputRef = useRef(p.onInput);
+  onInputRef.current = p.onInput;
+  const toCheck = needsPrecheck
+    ? p.mode.inputs.filter((s) => s.kind === "image" || s.kind === "video").flatMap((s) => up.valueOf(s).map((u) => ({ key: s.key, url: u, kind: s.kind as "image" | "video" })))
+    : [];
+  const checkSig = toCheck.map((x) => x.url).join("|");
+  useEffect(() => {
+    for (const it of toCheck) {
+      if (checksRef.current[it.url]) continue;
+      setChecks((c) => ({ ...c, [it.url]: "checking" }));
+      precheckApi(p.model.id, it.url, it.kind).then((r) => {
+        if (r.retryAfter) {
+          // BytePlus просит подождать (лимит запросов) — проверим этот реф ещё раз чуть позже
+          setTimeout(() => { setChecks((c) => { const n = { ...c }; delete n[it.url]; return n; }); setRetryTick((x) => x + 1); }, r.retryAfter * 1000);
+          return;
+        }
+        if (r.ok) { setChecks((c) => ({ ...c, [it.url]: r.skipped ? "skip" : "ok" })); return; }
+        setChecks((c) => { const n = { ...c }; delete n[it.url]; return n; });
+        const cur = inputsRef.current[it.key] ?? [];
+        if (cur.includes(it.url)) onInputRef.current(it.key, cur.filter((u) => u !== it.url));
+        setRejected(`Референс убран. ${r.reason ?? "BytePlus не пропустил его для Seedance"}`);
+      }).catch(() => {
+        // Проверка не удалась (сеть и т.п.) — не блокируем, модель проверит сама при генерации
+        setChecks((c) => ({ ...c, [it.url]: "skip" }));
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkSig, p.model.id, retryTick]);
+  const checkingNow = toCheck.some((x) => checks[x.url] === "checking");
+  const badge = (url: string) => !needsPrecheck ? null
+    : checks[url] === "checking" ? <span className="pc-badge checking" title="Проверяю, пропустит ли Seedance"><span className="spinner" /></span>
+    : checks[url] === "ok" ? <span className="pc-badge ok" title="Проверено BytePlus: Seedance примет этот референс"><Icon name="check" size={10} /></span>
+    : null;
   const { valueOf } = up;
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -101,10 +145,11 @@ export function VideoPanel(p: Props) {
   const touched = Boolean(p.prompt.trim()) || p.mode.inputs.some((s) => valueOf(s).length > 0);
   const [tried, setTried] = useState(false);
   const [nudge, setNudge] = useState(false);
-  const message = up.error ?? p.error ?? p.missingKey ?? (touched || tried ? p.validation : null);
+  const message = up.error ?? p.error ?? p.missingKey ?? (touched || tried ? p.validation : null) ?? (tried && checkingNow ? "Проверяю референсы — пара секунд" : null);
   // Кнопка всегда активна: если чего-то не хватает — подсказываем и ставим курсор в промпт
   function tryGenerate() {
-    if (p.validation || p.missingKey) {
+    setRejected(null);
+    if (p.validation || p.missingKey || checkingNow) {
       setTried(true);
       setNudge(true);
       setTimeout(() => setNudge(false), 400);
@@ -133,6 +178,7 @@ export function VideoPanel(p: Props) {
         ) : v ? (
           <>
             <MediaThumb url={v} kind={s.kind} />
+            {badge(v)}
             <button className="vx" onClick={(e) => { e.stopPropagation(); p.onInput(s.key, []); }} aria-label="Убрать"><Icon name="x" size={12} /></button>
           </>
         ) : (
@@ -279,6 +325,7 @@ export function VideoPanel(p: Props) {
                       <div key={s.key + u + i} className="vthumb" title={`${s.label} — нажмите, чтобы открыть; перетащите, чтобы поменять порядок`} {...up.dragProps(s, i)}
                         onClick={() => openRef(s.key, u)}>
                         <MediaThumb url={u} kind={s.kind} />
+                        {badge(u)}
                         <span className="tag">{s.kind === "image" ? "Ф" : s.kind === "video" ? "В" : "А"}{i + 1}</span>
                         <button onClick={(e) => { e.stopPropagation(); p.onInput(s.key, valueOf(s).filter((_, j) => j !== i)); }} aria-label="Убрать"><Icon name="x" size={11} /></button>
                       </div>
@@ -300,6 +347,13 @@ export function VideoPanel(p: Props) {
           );
         })()}
 
+        {rejected && (
+          <div className="pc-note">
+            <Icon name="x" size={13} />
+            <span>{rejected}</span>
+            <button type="button" onClick={() => setRejected(null)} aria-label="Скрыть"><Icon name="x" size={11} /></button>
+          </div>
+        )}
         <div className="vprompt">
           <div className="vprompt-label">Промпт</div>
           <textarea ref={taRef} value={p.prompt} rows={5}

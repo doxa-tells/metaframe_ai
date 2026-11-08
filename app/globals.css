@@ -834,3 +834,12 @@ input:focus, select:focus, textarea:focus { border-color: #2b4c5b; }
 .comp-thumb, .vthumb:not(.add):not(.loading), .vslot.filled { cursor: zoom-in; }
 @media (max-width: 760px) { .refview { width: 100%; height: 100%; border-radius: 0; border: none; } }
 .load-sentinel { height: 1px; width: 100%; }
+/* Предпроверка референсов (Seedance) */
+.pc-badge { position: absolute; left: 4px; top: 4px; z-index: 2; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,.7); pointer-events: auto; }
+.pc-badge .spinner { width: 11px; height: 11px; border-width: 2px; }
+.pc-badge.ok { color: #6bf0a8; }
+.vslot .pc-badge { left: 6px; top: 6px; }
+.pc-note { display: flex; align-items: flex-start; gap: 8px; padding: 9px 10px; border-radius: 12px; border: 1px solid rgba(255,138,138,.35); background: rgba(255,90,90,.06); color: #ffb0b0; font-size: 12.5px; line-height: 1.4; }
+.pc-note > svg { flex: 0 0 auto; margin-top: 2px; }
+.pc-note span { flex: 1; }
+.pc-note button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px; }

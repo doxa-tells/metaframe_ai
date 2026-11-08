@@ -319,6 +319,53 @@ const genjutsuLight: ModelSpec = {
   ],
 };
 
+// ---------- Seedance 2.5 через Higgsfield API ----------
+// Та же модель ByteDance, но через канал Higgsfield (на их сайте проходят референсы с лицами,
+// которые прямой BytePlus API отклоняет). Ключ — тот же HF_API_KEY.
+const SDH_AR: ParamSpec = { key: "aspect_ratio", label: "Формат", type: "select", default: "16:9", options: opts("16:9", "9:16", "1:1", "4:3", "3:4", "21:9") };
+const SDH_BITRATE: ParamSpec = { key: "bitrate_mode", label: "Битрейт", type: "select", default: "high", options: [{ value: "high", label: "Высокий" }, { value: "standard", label: "Обычный" }], advanced: true };
+// Прайс Higgsfield API без скидок, $/сек (с видео на входе дороже примерно на 20%)
+const SDH_PRICE: Record<string, number> = { "480p": 0.2056, "720p": 0.4622, "1080p": 1.1372 };
+const sdTok = (k: MediaKind, n: number) => `@${k === "image" ? "Image" : k === "video" ? "Video" : "Audio"} ${n}`;
+
+const seedanceHf: ModelSpec = {
+  id: "seedance-2.5-hf",
+  name: "Seedance 2.5 · Higgsfield",
+  vendor: "ByteDance",
+  kind: "video",
+  provider: "higgsfield",
+  description: "Seedance 2.5 через Higgsfield: можно пробовать референсы с лицами, которые не пропускает BytePlus",
+  priceNote: "Higgsfield API: ~$0.21/с 480p, $0.46/с 720p, $1.14/с 1080p (с видео-референсом дороже ~на 20%)",
+  price: (_m, p) => (SDH_PRICE[String(p.resolution)] ?? 0.4622) * Number(p.duration ?? 5),
+  modes: [
+    {
+      id: "reference", label: "Промпт и референсы", endpoint: "bytedance/seedance-2.5/reference-to-video",
+      promptRequired: true, textFallback: "text",
+      inputs: [
+        { key: "image_urls", label: "Изображения", kind: "image", max: 30 },
+        { key: "video_urls", label: "Видео (2–30 с)", kind: "video", max: 10 },
+        { key: "audio_urls", label: "Аудио (wav/mp3)", kind: "audio", max: 10 },
+      ],
+      params: [SD_DUR, SD_RES, SDH_AR, SD_AUDIO, SDH_BITRATE],
+      refToken: sdTok,
+      hint: "Референсы необязательны. Ссылки: @Image 1, @Video 1, @Audio 1",
+    },
+    {
+      id: "image", label: "Кадр → видео", endpoint: "bytedance/seedance-2.5/image-to-video", promptRequired: false,
+      inputs: [
+        { key: "image_url", label: "Первый кадр", kind: "image", max: 1, single: true, required: true },
+        { key: "end_image_url", label: "Последний кадр", kind: "image", max: 1, single: true },
+      ],
+      params: [SD_DUR, SD_RES, SD_AUDIO, SDH_BITRATE],
+      hint: "Формат берётся из первого кадра",
+    },
+    {
+      id: "text", label: "Текст → видео", endpoint: "bytedance/seedance-2.5/text-to-video", hidden: true, promptRequired: true,
+      inputs: [], params: [SD_DUR, SD_RES, SDH_AR, SD_AUDIO, SDH_BITRATE],
+    },
+  ],
+};
+
 // ---------- Gemini Omni 1.1 Flash (Google, преемник Veo в Gemini API) ----------
 const OM_RES: ParamSpec = { key: "resolution", label: "Разрешение", type: "select", default: "720p",
   options: [{ value: "360p", label: "360p (черновик)" }, { value: "720p", label: "720p" }, { value: "1080p", label: "1080p" }, { value: "4k", label: "4K" }] };
@@ -395,7 +442,7 @@ export function buildOmniPlan(req: GenRequest): {
   return { media, text, responseFormat, task };
 }
 
-export const MODELS: ModelSpec[] = [nanoBanana, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, kling, omni, genjutsu, genjutsuLight];
+export const MODELS: ModelSpec[] = [nanoBanana, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, seedanceHf, kling, omni, genjutsu, genjutsuLight];
 
 export function getModel(id: string): ModelSpec | undefined {
   return MODELS.find((m) => m.id === id);

@@ -125,6 +125,7 @@ export async function ensureThumbs(ids: string[], origin: string): Promise<JobRe
   return updated;
 }
 
+export const loadInlinePublic = (url: string, origin: string) => loadInline(url, origin);
 async function loadInline(url: string, origin: string) {
   const lk = localKeyOf(url);
   if (lk) {
@@ -256,7 +257,11 @@ export async function createJob(asked: GenRequest, origin: string): Promise<JobR
   if (model.provider === "byteplus") {
     const arkModel = ark.arkModelId(model.id, ARK_MODEL_IDS[model.id]);
     const conv: Record<string, string[]> = {};
-    for (const [k, v] of Object.entries(req.inputs ?? {})) conv[k] = await Promise.all((v ?? []).filter(Boolean).map((u) => toProviderUrl(u, origin)));
+    const { arkInputFor } = await import("./precheck");
+    for (const [k, v] of Object.entries(req.inputs ?? {})) {
+      conv[k] = await Promise.all((v ?? []).filter(Boolean).map(async (u) =>
+        (model.kind === "video" ? await arkInputFor(u) : null) ?? toProviderUrl(u, origin)));
+    }
     if (model.kind === "video") {
       const taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: conv }, arkModel));
       const rec: JobRecord = { ...base, providerRequestId: `ark:${taskId}` };

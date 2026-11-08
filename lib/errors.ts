@@ -10,6 +10,8 @@ export function humanizeError(status: string, raw?: string | null): HumanError {
   if (status === "canceled") return { ...base, kind: "canceled", title: "Отменено", text: "Генерация остановлена" };
   if (status === "nsfw") return { ...base, kind: "censor", title: "Цензура", text: "Провайдер скрыл результат модерацией", hint: IP_HINT };
 
+  if (has(/PrivacyInformation|may contain real person|реального человека/i))
+    return { ...base, kind: "censor", title: "Реальное лицо", text: "Seedance не принимает референсы с реальными лицами — даже фотореалистичные сгенерированные", hint: "Попробуйте «Seedance 2.5 · Higgsfield», Kling или Gemini Omni" };
   if (has(/RECITATION|copyright|авторск/i))
     return { ...base, kind: "copyright", title: "Копирайт", text: "Результат слишком похож на защищённую работу или персонажа", hint: IP_HINT };
   if (has(/Input\w*Sensitive|Input\w*Risk|заблокировано \(|blockReason|prompt.*(blocked|rejected)|InputText|InputImage/i))
@@ -33,4 +35,10 @@ export function humanizeError(status: string, raw?: string | null): HumanError {
   if (has(/\b400\b|InvalidParameter|invalid|не поддерж|unsupported/i))
     return { ...base, kind: "params", title: "Параметры", text: e.replace(/^.*?:\s*/, "").slice(0, 160) || "Провайдер отклонил параметры" };
   return { ...base, kind: "other", title: "Ошибка", text: e.slice(0, 160) || "Генерация не удалась" };
+}
+
+// Одной строкой — для подсказок под полем ввода
+export function humanizeMessage(raw: string): string {
+  const h = humanizeError("failed", raw);
+  return h.kind === "other" || h.kind === "params" ? raw : `${h.title}: ${h.text}${h.hint ? `. ${h.hint}` : ""}`;
 }

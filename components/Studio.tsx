@@ -6,6 +6,7 @@ import { bulkDelete, cachedJobs, cancelJob, deleteJob, generate, isTerminal, lis
 import { useApp } from "./AppContext";
 import { Gallery, type BulkItem } from "./Gallery";
 import { notifySpent } from "./BalanceBar";
+import { humanizeMessage } from "@/lib/errors";
 import { Composer } from "./Composer";
 import { VideoPanel } from "./VideoPanel";
 import { Icon } from "./Icon";
@@ -158,10 +159,10 @@ export function Studio({ kind }: { kind: Kind }) {
       const job = await generate(request);
       setJobs((prev) => prev.map((j) => (j.id === tempId ? job : j)));
       notifySpent();
-      if (job.status === "failed") setError(job.error ?? "Ошибка генерации");
+      if (job.status === "failed") setError(humanizeMessage(job.error ?? "Ошибка генерации"));
     } catch (e) {
       setJobs((prev) => prev.filter((j) => j.id !== tempId));
-      setError((e as Error).message);
+      setError(humanizeMessage((e as Error).message));
     }
   }
 
