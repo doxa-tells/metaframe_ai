@@ -843,3 +843,4 @@ input:focus, select:focus, textarea:focus { border-color: #2b4c5b; }
 .pc-note > svg { flex: 0 0 auto; margin-top: 2px; }
 .pc-note span { flex: 1; }
 .pc-note button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px; }
+.pc-note.warn { border-color: rgba(255,211,107,.35); background: rgba(255,200,80,.06); color: #ffe0a0; }

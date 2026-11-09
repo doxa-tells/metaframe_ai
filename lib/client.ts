@@ -158,6 +158,6 @@ export const cachedJobs = (kind: Kind) => jobsCache.get(kind);
 export const rememberJobs = (kind: Kind, jobs: Job[], cursor?: string) => jobsCache.set(kind, { jobs, cursor });
 
 // Заранее проверить референс на модерацию провайдера (Seedance: реальные лица, копирайт)
-export type PrecheckResult = { ok: boolean; reason?: string; status?: string; skipped?: boolean; retryAfter?: number };
+export type PrecheckResult = { ok: boolean; reason?: string; status?: string; skipped?: boolean; skipReason?: string; retryAfter?: number };
 export const precheckApi = (modelId: string, url: string, kind: "image" | "video") =>
   api<PrecheckResult>("/api/precheck", { method: "POST", body: JSON.stringify({ modelId, url, kind }) });

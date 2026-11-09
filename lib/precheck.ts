@@ -13,7 +13,7 @@ import { ProviderError } from "./providers/higgsfield";
 export type PrecheckResult = {
   ok: boolean; reason?: string; at: number;
   assetId?: string; status?: "Processing" | "Active" | "Failed";
-  skipped?: boolean; retryAfter?: number;
+  skipped?: boolean; skipReason?: string; retryAfter?: number;
 };
 
 const pathOf = (url: string) => `precheck/seedance/${createHash("sha1").update(url).digest("hex")}.json`;
@@ -56,7 +56,8 @@ export async function precheckSeedance(modelId: string, url: string, kind: "imag
   }
 
   // Без ключей IAM проверить заранее нечем — Seedance проверит сам при генерации (это бесплатно)
-  if (!assetsConfigured() || localKeyOf(url)) return { ok: true, at: Date.now(), skipped: true };
+  if (!assetsConfigured()) return { ok: true, at: Date.now(), skipped: true, skipReason: "Предпроверка выключена: в Vercel не видны BYTEPLUS_ACCESS_KEY и BYTEPLUS_SECRET_KEY (проверьте имена и сделайте Redeploy)" };
+  if (localKeyOf(url)) return { ok: true, at: Date.now(), skipped: true, skipReason: "Локальный файл — BytePlus не может его скачать" };
 
   if (rec?.status === "Active" || rec?.status === "Failed") return rec;
 
@@ -101,4 +102,20 @@ export async function arkInputFor(url: string): Promise<string | null> {
   }
   if (st.status === "Missing") { await dropRec(item); return null; }
   throw new ProviderError("Референс ещё проверяется BytePlus — подождите несколько секунд и повторите", 409);
+}
+
+// Диагностика: видны ли ключи и отвечает ли библиотека ассетов (без секретов в ответе)
+export async function precheckDiagnostics() {
+  const { assetsConfigured: has, ensureGroup, ARK_PROJECT } = await import("./providers/arkAssets");
+  const out: Record<string, unknown> = {
+    keys: has(),
+    accessKeyPrefix: (process.env.BYTEPLUS_ACCESS_KEY ?? "").trim().slice(0, 4) || null,
+    host: process.env.BYTEPLUS_OPENAPI_HOST || "ark.ap-southeast-1.byteplusapi.com",
+    region: process.env.BYTEPLUS_REGION || "ap-southeast-1",
+    project: ARK_PROJECT(),
+  };
+  if (!has()) return out;
+  try { out.group = await ensureGroup(); out.ok = true; }
+  catch (e) { out.ok = false; out.error = (e as Error).message; }
+  return out;
 }

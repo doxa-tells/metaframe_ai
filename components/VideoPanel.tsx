@@ -47,6 +47,7 @@ export function VideoPanel(p: Props) {
   const [checks, setChecks] = useState<Record<string, "checking" | "ok" | "skip">>({});
   const [retryTick, setRetryTick] = useState(0);
   const [rejected, setRejected] = useState<string | null>(null);
+  const [checkInfo, setCheckInfo] = useState<string | null>(null);
   const checksRef = useRef(checks);
   checksRef.current = checks;
   const inputsRef = useRef(p.inputs);
@@ -67,14 +68,19 @@ export function VideoPanel(p: Props) {
           setTimeout(() => { setChecks((c) => { const n = { ...c }; delete n[it.url]; return n; }); setRetryTick((x) => x + 1); }, r.retryAfter * 1000);
           return;
         }
-        if (r.ok) { setChecks((c) => ({ ...c, [it.url]: r.skipped ? "skip" : "ok" })); return; }
+        if (r.ok) {
+          setChecks((c) => ({ ...c, [it.url]: r.skipped ? "skip" : "ok" }));
+          if (r.skipped && r.skipReason) setCheckInfo(r.skipReason);
+          return;
+        }
         setChecks((c) => { const n = { ...c }; delete n[it.url]; return n; });
         const cur = inputsRef.current[it.key] ?? [];
         if (cur.includes(it.url)) onInputRef.current(it.key, cur.filter((u) => u !== it.url));
         setRejected(`Референс убран. ${r.reason ?? "BytePlus не пропустил его для Seedance"}`);
-      }).catch(() => {
-        // Проверка не удалась (сеть и т.п.) — не блокируем, модель проверит сама при генерации
+      }).catch((e: Error) => {
+        // Проверка не удалась — не блокируем (Seedance проверит сам при генерации), но показываем причину
         setChecks((c) => ({ ...c, [it.url]: "skip" }));
+        setCheckInfo(`Проверка BytePlus не сработала: ${e.message}`);
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -347,6 +353,13 @@ export function VideoPanel(p: Props) {
           );
         })()}
 
+        {needsPrecheck && checkInfo && !rejected && (
+          <div className="pc-note warn">
+            <Icon name="info" size={13} />
+            <span>{checkInfo}</span>
+            <button type="button" onClick={() => setCheckInfo(null)} aria-label="Скрыть"><Icon name="x" size={11} /></button>
+          </div>
+        )}
         {rejected && (
           <div className="pc-note">
             <Icon name="x" size={13} />
