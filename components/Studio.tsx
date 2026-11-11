@@ -17,6 +17,7 @@ type FormState = {
   prompt: string;
   params: Record<string, Record<string, unknown>>; // по ключу model:mode
   inputs: Record<string, Record<string, string[]>>;
+  pool?: Record<string, string[]>; // все рефы по типам — переживают переход через модель, где мест меньше
 };
 
 const k = (m: string, mode: string) => `${m}:${mode}`;
@@ -46,7 +47,25 @@ export function Studio({ kind }: { kind: Kind }) {
   const params = useMemo(() => ({ ...defaultParams(mode), ...(form.params[key] ?? {}) }), [mode, form.params, key]);
   const inputs = form.inputs[key] ?? {};
 
-  // Восстановление формы
+    // Набор рефов по типам: что видно в текущем режиме, плюс то, что в него не влезло.
+  // Удалённые пользователем рефы из набора уходят.
+  function poolOf(prev: Record<string, string[]> | undefined, md: typeof mode, before: Record<string, string[]>, after = before) {
+    const byKind = (vals: Record<string, string[]>) => {
+      const r: Record<string, string[]> = {};
+      for (const inp of md.inputs) for (const u of vals[inp.key] ?? []) if (u && !(r[inp.kind] ??= []).includes(u)) r[inp.kind].push(u);
+      return r;
+    };
+    const was = byKind(before), now = byKind(after);
+    const out: Record<string, string[]> = { ...(prev ?? {}) };
+    for (const kind of new Set(md.inputs.map((x) => x.kind))) {
+      const shown = now[kind] ?? [];
+      const removed = (was[kind] ?? []).filter((u) => !shown.includes(u));
+      out[kind] = [...shown, ...(prev?.[kind] ?? []).filter((u) => !shown.includes(u) && !removed.includes(u))];
+    }
+    return out;
+  }
+
+// Восстановление формы
   useEffect(() => {
     try {
       const raw = localStorage.getItem(storeKey);
@@ -127,15 +146,35 @@ export function Studio({ kind }: { kind: Kind }) {
     }
   }, [jobs, updateJob]);
 
+  // При смене модели или режима референсы переезжают в новую: раскладываем их по входам того же типа
+  // (картинки к картинкам, видео к видео), сколько влезет
+  function carry(f: FormState, toModelId: string, toModeId: string): FormState {
+    const fromModel = getModel(f.modelId);
+    const toModel = getModel(toModelId);
+    if (!fromModel || !toModel) return { ...f, modelId: toModelId, modeId: toModeId };
+    const fromMode = visibleMode(fromModel, f.modeId);
+    const toMode = visibleMode(toModel, toModeId);
+    const pool = poolOf(f.pool, fromMode, f.inputs[k(fromModel.id, fromMode.id)] ?? {});
+    const next = { ...f, modelId: toModel.id, modeId: toMode.id, pool };
+    if (!Object.values(pool).some((l) => l.length)) return next; // переносить нечего — у новой модели остаются её рефы
+    const left: Record<string, string[]> = Object.fromEntries(Object.entries(pool).map(([kk, v]) => [kk, [...v]]));
+    const dst: Record<string, string[]> = {};
+    for (const inp of toMode.inputs) dst[inp.key] = (left[inp.kind] ?? []).splice(0, inp.max);
+    return { ...next, inputs: { ...f.inputs, [k(toModel.id, toMode.id)]: dst } };
+  }
   function setModel(id: string) {
     const m = getModel(id)!;
-    setForm((f) => ({ ...f, modelId: id, modeId: m.modes.some((x) => x.id === f.modeId) ? visibleMode(m, f.modeId).id : firstMode(m).id }));
+    setForm((f) => carry(f, id, m.modes.some((x) => x.id === f.modeId) ? visibleMode(m, f.modeId).id : firstMode(m).id));
   }
   function setParam(pk: string, v: unknown) {
     setForm((f) => ({ ...f, params: { ...f.params, [key]: { ...(f.params[key] ?? params), [pk]: v } } }));
   }
   function setInput(ik: string, v: string[]) {
-    setForm((f) => ({ ...f, inputs: { ...f.inputs, [key]: { ...(f.inputs[key] ?? inputs), [ik]: v } } }));
+    setForm((f) => {
+      const cur = { ...(f.inputs[key] ?? inputs), [ik]: v };
+      // Правки пользователя обновляют общий набор рефов для тех типов, что есть в текущем режиме
+      return { ...f, inputs: { ...f.inputs, [key]: cur }, pool: poolOf(f.pool, mode, f.inputs[key] ?? inputs, cur) };
+    });
   }
 
   const request = { modelId: model.id, modeId: mode.id, prompt: form.prompt, params, inputs };
@@ -171,7 +210,7 @@ export function Studio({ kind }: { kind: Kind }) {
     const modeId = jm ? visibleMode(jm, job.modeId).id : job.modeId;
     const kk = k(job.modelId, modeId);
     setForm((f) => ({
-      ...f, modelId: job.modelId, modeId, prompt: job.prompt,
+      ...f, modelId: job.modelId, modeId, prompt: job.prompt, pool: undefined,
       params: { ...f.params, [kk]: job.params }, inputs: { ...f.inputs, [kk]: job.inputs },
     }));
   }
@@ -218,7 +257,7 @@ export function Studio({ kind }: { kind: Kind }) {
   const shared = {
     models, model, mode, prompt: form.prompt, params, inputs, cost, validation, error, missingKey,
     onModel: setModel,
-    onMode: (id: string) => setForm((f) => ({ ...f, modeId: id })),
+    onMode: (id: string) => setForm((f) => carry(f, f.modelId, id)),
     onPrompt: (v: string) => setForm((f) => ({ ...f, prompt: v })),
     onParam: setParam,
     onInput: setInput,

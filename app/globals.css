@@ -844,3 +844,113 @@ input:focus, select:focus, textarea:focus { border-color: #2b4c5b; }
 .pc-note span { flex: 1; }
 .pc-note button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px; }
 .pc-note.warn { border-color: rgba(255,211,107,.35); background: rgba(255,200,80,.06); color: #ffe0a0; }
+.pc-note .pc-switch { display: block; margin-top: 8px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--accent); background: none; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
+.pc-note .pc-switch:hover { background: rgba(0,229,255,.08); }
+
+/* ---------- Аккаунты: вход, регистрация, проверка ---------- */
+input[type=email], input[type=tel] { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; outline: none; }
+input[type=email]:focus, input[type=tel]:focus { border-color: #2b4c5b; }
+.login-box input, .login-box textarea { text-align: left; }
+.login-switch { align-self: center; margin-top: 2px; }
+.reg-box { width: min(420px, 100%); gap: 10px; }
+.reg-box p { line-height: 1.45; }
+.reg-check { display: flex; gap: 9px; align-items: flex-start; text-align: left; font-size: 12.5px; line-height: 1.45; color: #c3d2d9; cursor: pointer; }
+.reg-check input { margin-top: 2px; accent-color: var(--accent); flex-shrink: 0; }
+.reg-check a { color: var(--accent); }
+.gate-box { width: min(420px, 100%); }
+.gate-box p { line-height: 1.5; }
+.gate-who { padding: 10px; border: 1px solid var(--line2); border-radius: 10px; line-height: 1.5; }
+.gate-link { align-self: center; }
+.linkbtn.inline { display: inline; color: var(--accent); }
+
+.terms { max-width: 760px; margin: 0 auto; padding: 32px 20px 60px; line-height: 1.6; }
+.terms h1 { margin: 18px 0 2px; font-family: var(--font-head); }
+.terms h2 { font-size: 16px; margin: 26px 0 6px; color: var(--accent); }
+.terms p, .terms li { color: #c3d2d9; }
+.terms ul { padding-left: 20px; }
+.terms-logo { display: inline-flex; align-items: center; gap: 10px; font-family: var(--font-head); }
+.terms-logo img { width: 36px; height: 36px; }
+
+/* Меню и уведомления пользователя */
+.navsvg { display: inline-grid; place-items: center; color: var(--text); }
+.tb-tab .navsvg { width: 24px; height: 24px; }
+.tb-menu-me { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 6px; font-size: 13px; min-width: 0; }
+.tb-menu-me span { font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.banner.danger { background: #2a0d0d; color: #ffb3b3; border-color: #5a1d1d; }
+.warn-modal { border-color: #5a3a10; }
+.warn-reason { margin: 0; padding: 12px; border-radius: 10px; background: #2a1d08; color: #ffd98a; line-height: 1.5; white-space: pre-wrap; }
+
+/* ---------- Админка ---------- */
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.admin { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 4px 16px 16px; }
+.admin-top { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.admin-top .seg { flex: 0 0 auto; }
+.admin-top .seg button { padding: 8px 14px; white-space: nowrap; }
+.admin-top .badge { margin-left: 6px; }
+.admin-lookup { display: flex; gap: 8px; width: min(420px, 100%); }
+.admin-err { margin: 0; cursor: pointer; }
+.admin-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 320px 1fr; gap: 12px; }
+.admin-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; padding-right: 2px; }
+.admin-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.admin-filters .chip { font-size: 12px; padding: 5px 10px; cursor: pointer; color: var(--text); }
+.chip.on { border-color: var(--accent); color: var(--accent); background: #06222a; }
+.admin-user { text-align: left; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; color: var(--text); }
+.admin-user:hover { border-color: var(--line2); background: var(--hover); }
+.admin-user.on { border-color: var(--accent); }
+.admin-user .flag { color: #ffb36b; }
+.st { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid; flex-shrink: 0; }
+.st-pending { color: #ffcf6b; border-color: #4a3410; background: #2a1d08; }
+.st-active { color: #6ff0a0; border-color: #13442b; background: #082414; }
+.st-frozen { color: #8fd3ff; border-color: #154160; background: #08202e; }
+.st-banned, .st-rejected { color: #ffb3b3; border-color: #5a1d1d; background: #2a0d0d; }
+.admin-detail { min-height: 0; overflow-y: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+.ud { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+.ud-head { display: flex; gap: 10px; align-items: flex-start; }
+.ud-head h2 { margin: 0; font-size: 18px; }
+.ud-back { display: none; }
+.ud-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.ud-grid > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; background: var(--panel2); font-size: 13px; overflow-wrap: anywhere; }
+.ud-grid > div.wide { grid-column: 1 / -1; }
+.ud-grid span { font-size: 11px; color: var(--muted); }
+.ud-grid a { color: var(--accent); }
+.ud-actions { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line2); border-radius: 12px; }
+.ud-btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ud-freeze { display: inline-flex; gap: 6px; }
+.ud-freeze select { width: auto; padding: 5px 8px; }
+.ud-limit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ud-limit input { width: 140px; padding: 6px 9px; }
+.ud-block { display: flex; flex-direction: column; gap: 8px; }
+.ud-block h3 { margin: 0; font-size: 14px; }
+.ud-block .seg button { min-width: 0; padding: 5px 10px; }
+.ud-warn { padding: 8px 10px; border-radius: 10px; background: #2a1d08; color: #ffd98a; }
+.ud-jobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.ud-job { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--panel2); }
+.ud-job.focus { border-color: #ffb36b; box-shadow: 0 0 0 2px rgba(255,179,107,.25); }
+.ud-job-media { position: relative; aspect-ratio: 1; background: #000; }
+.ud-job-media img, .ud-job-media video { width: 100%; height: 100%; object-fit: cover; }
+.ud-job-empty { height: 100%; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+.ud-job-empty.censor { color: #ffb3b3; background: #1a0808; }
+.ud-count { position: absolute; top: 6px; right: 6px; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: rgba(0,0,0,.7); }
+.ud-job-meta { display: flex; flex-direction: column; gap: 5px; padding: 8px 10px 10px; }
+.ud-prompt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; color: #c3d2d9; line-height: 1.35; }
+.ud-refs { display: flex; gap: 6px; flex-wrap: wrap; }
+.ud-refs a { color: var(--accent); font-size: 11.5px; }
+.modlog { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; min-height: 0; }
+.admin > .modlog { flex: 1; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 10px; }
+.ml-row { display: grid; grid-template-columns: 120px 200px 200px 1fr; gap: 10px; padding: 7px 8px; border-radius: 8px; font-size: 12.5px; align-items: baseline; }
+.ml-row:nth-child(odd) { background: rgba(255,255,255,.02); }
+.modlog.compact .ml-row { grid-template-columns: 110px 190px 1fr; }
+.ml-at { color: var(--muted); }
+.ml-user { justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ml-reason { overflow-wrap: anywhere; color: #c3d2d9; }
+.ml-ban .ml-act, .ml-takedown .ml-act, .ml-auto_freeze .ml-act { color: #ffb3b3; }
+.ml-warn .ml-act, .ml-auto_flag .ml-act, .ml-freeze .ml-act { color: #ffcf6b; }
+.ml-verify .ml-act, .ml-unban .ml-act, .ml-unfreeze .ml-act { color: #6ff0a0; }
+@media (max-width: 860px) {
+  .admin { padding: 4px 10px 10px; }
+  .admin-body { grid-template-columns: 1fr; }
+  .admin-body.has-sel .admin-list { display: none; }
+  .admin-body:not(.has-sel) .admin-detail { display: none; }
+  .ud-back { display: inline-flex; }
+  .ml-row, .modlog.compact .ml-row { grid-template-columns: 1fr; gap: 2px; }
+}

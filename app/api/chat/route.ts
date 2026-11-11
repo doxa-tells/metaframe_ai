@@ -1,6 +1,7 @@
 import { googleKey, GEMINI_CHAT_MODEL, fetchAsInline } from "@/lib/providers/google";
 import { localKeyOf, readLocalFile, toAbsolute } from "@/lib/storage";
-import { requestOrigin } from "@/lib/http";
+import { errorResponse, requestOrigin } from "@/lib/http";
+import { requireCtx } from "@/lib/me";
 
 export const maxDuration = 120;
 
@@ -43,6 +44,7 @@ async function readSSE(res: Response, onData: (json: Record<string, unknown>) =>
 }
 
 export async function POST(req: Request) {
+  try { await requireCtx({ active: true }); } catch (e) { return errorResponse(e); }
   const body = (await req.json()) as Body;
   const origin = requestOrigin(req);
   // Без правил по умолчанию: системный промпт — только инструкции проекта, если они есть

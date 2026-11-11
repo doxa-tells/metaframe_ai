@@ -29,23 +29,29 @@ export type JobRecord = {
   error?: string;
   createdAt: number;
   finishedAt?: number;
+  userId?: string; // кто запустил (для пользователей; у владельца пусто)
+  ip?: string;
 };
 
 export const MOCK = process.env.MOCK_PROVIDERS === "1";
 export const TERMINAL: JobStatus[] = ["completed", "failed", "nsfw", "canceled"];
 
 // id = <kind>_<обратная метка времени>_<случайное>, чтобы новые шли первыми при сортировке по имени
-export function newJobId(kind: Kind): string {
+// У пользователей к id добавляется их uid, а задачи лежат в их собственной папке u/<uid>/jobs/
+export function newJobId(kind: Kind, uid = ""): string {
   const inv = String(9_999_999_999_999 - Date.now()).padStart(13, "0");
-  return `${kind}_${inv}_${randomUUID().slice(0, 8)}`;
+  return `${kind}_${inv}_${randomUUID().slice(0, 8)}${uid ? `_${uid}` : ""}`;
 }
-export function parseJobId(id: string): { kind: Kind; base: string } | null {
-  const m = /^(image|video)_(\d{13}_[a-f0-9]{8})$/.exec(id);
-  return m ? { kind: m[1] as Kind, base: m[2] } : null;
+export function parseJobId(id: string): { kind: Kind; base: string; uid: string } | null {
+  const m = /^(image|video)_(\d{13}_[a-f0-9]{8})(?:_(u[a-f0-9]{10}))?$/.exec(id);
+  return m ? { kind: m[1] as Kind, base: m[2], uid: m[3] ?? "" } : null;
 }
+// Чья задача: "" — владельца, иначе uid пользователя; null — некорректный id
+export const jobScope = (id: string): string | null => parseJobId(id)?.uid ?? null;
+const scopeRoot = (scope: string) => (scope ? `u/${scope}/jobs/` : "jobs/");
 const jobPrefix = (id: string) => {
   const p = parseJobId(id)!;
-  return `jobs/${p.kind}/${p.base}.`;
+  return `${scopeRoot(p.uid)}${p.kind}/${p.base}.`;
 };
 const pendingPath = (id: string) => `${jobPrefix(id)}p.json`;
 const donePath = (id: string) => `${jobPrefix(id)}d.json`;
@@ -172,30 +178,39 @@ async function runSync(base: JobRecord, work: () => Promise<Partial<JobRecord>>)
     rec = { ...base, status: "failed", cost: 0, error: describeNetError(e, where).message, finishedAt: Date.now() };
   }
   await putJSON(donePath(base.id), rec);
+  await afterDone(rec);
   const files = await findJobFiles(base.id).catch(() => null);
   if (files?.pending) await deleteItems([files.pending]).catch(() => {});
   return rec;
 }
 
-export async function createJob(asked: GenRequest, origin: string): Promise<JobRecord> {
+export async function createJob(asked: GenRequest, origin: string, who: { uid?: string; ip?: string; souls?: string[] } = {}): Promise<JobRecord> {
   const err = validateRequest(asked);
   if (err) throw new hf.ProviderError(err, 400);
+  // Пользователь может брать только своих персонажей Soul ID
+  const soulId = asked.params?.custom_reference_id;
+  if (who.uid && typeof soulId === "string" && soulId && !(who.souls ?? []).includes(soulId)) {
+    throw new hf.ProviderError("Этот Soul ID вам недоступен — создайте своего персонажа", 403);
+  }
   // В записи задачи остаётся режим, выбранный в интерфейсе; провайдеру уходит фактический
   const req = resolveRequest(asked);
   const model = getModel(req.modelId)!;
   const mode = getMode(model, asked.modeId);
-  const id = newJobId(model.kind);
+  const id = newJobId(model.kind, who.uid ?? "");
   const base: JobRecord = {
     id, kind: model.kind, modelId: model.id, modeId: mode.id,
     prompt: (asked.prompt ?? "").trim(), params: asked.params ?? {}, inputs: asked.inputs ?? {},
     cost: estimateCost(asked), provider: MOCK ? "mock" : model.provider,
     status: "queued", outputs: [], createdAt: Date.now(),
+    ...(who.uid ? { userId: who.uid } : {}), ...(who.ip ? { ip: who.ip } : {}),
   };
 
   if (MOCK) {
     if (model.kind === "image") {
       return runSync(base, async () => {
         await new Promise((r) => setTimeout(r, 4000)); // имитация времени генерации
+        // Слово mock-block в промпте имитирует отказ модерации (проверка учёта нарушений)
+        if (/mock-block/.test(base.prompt)) return { status: "failed", cost: 0, outputs: [], error: "Google: заблокировано (IMAGE_SAFETY)" };
         const n = Number(req.params.count ?? req.params.batch_size ?? 1) || 1;
         const outputs: JobOutput[] = [];
         for (let i = 0; i < n; i++) {
@@ -260,7 +275,7 @@ export async function createJob(asked: GenRequest, origin: string): Promise<JobR
     const { arkInputFor } = await import("./precheck");
     for (const [k, v] of Object.entries(req.inputs ?? {})) {
       conv[k] = await Promise.all((v ?? []).filter(Boolean).map(async (u) =>
-        (model.kind === "video" ? await arkInputFor(u) : null) ?? toProviderUrl(u, origin)));
+        (model.kind === "video" ? await arkInputFor(u, who.uid ?? "") : null) ?? toProviderUrl(u, origin)));
     }
     if (model.kind === "video") {
       const taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: conv }, arkModel));
@@ -315,7 +330,24 @@ async function finalize(id: string, patch: Partial<JobRecord>): Promise<JobRecor
   if (done.status !== "completed") done.cost = 0;
   await putJSON(donePath(id), done);
   await deleteItems([files.pending]).catch(() => {});
+  await afterDone(done);
   return done;
+}
+
+// Срабатывания модерации провайдеров у пользователей учитываем (lib/moderation)
+async function afterDone(rec: JobRecord) {
+  if (!rec.userId || rec.status === "completed" || rec.status === "canceled") return;
+  try { await (await import("./moderation")).noteBlocked(rec); }
+  catch (e) { console.error("noteBlocked:", (e as Error).message); }
+}
+
+// Какой запрос провайдера принадлежит задаче (сверяем, что опрашивают именно её)
+export async function storedProviderId(id: string): Promise<string | null> {
+  if (!parseJobId(id)) return null;
+  const files = await findJobFiles(id);
+  const it = files.pending ?? files.done;
+  const rec = it ? await readJSON<JobRecord>(it) : null;
+  return rec?.providerRequestId ?? null;
 }
 
 // Опрос статуса: обращаемся к хранилищу только при завершении, чтобы не тратить операции Blob
@@ -404,8 +436,8 @@ async function readJobCached(item: StoredItem): Promise<JobRecord | null> {
   return rec;
 }
 
-export async function listJobs(kind: Kind, cursor?: string): Promise<{ jobs: JobRecord[]; cursor?: string }> {
-  const { items, cursor: next } = await listItems(`jobs/${kind}/`, 40, cursor);
+export async function listJobs(kind: Kind, cursor?: string, scope = ""): Promise<{ jobs: JobRecord[]; cursor?: string }> {
+  const { items, cursor: next } = await listItems(`${scopeRoot(scope)}${kind}/`, 40, cursor);
   const byBase = new Map<string, StoredItem>();
   for (const it of items) {
     const base = it.pathname.replace(/\.(p|d)\.json$/, "");

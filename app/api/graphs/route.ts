@@ -2,17 +2,23 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { listItems, putJSON, readJSON } from "@/lib/storage";
 import { errorResponse } from "@/lib/http";
+import { requireCtx } from "@/lib/me";
 
 type Graph = { id: string; name: string; nodes: unknown[]; edges: unknown[]; savedAt: number };
 
-// Каждое сохранение — новый файл; список показывает последние версии каждой схемы
+// Каждое сохранение — новый файл; список показывает последние версии каждой схемы.
+// У пользователя свои схемы в u/<uid>/graphs/
+const dirOf = (scope: string) => (scope ? `u/${scope}/graphs/` : "graphs/");
+
 export async function GET(req: Request) {
   try {
+    const { scope } = await requireCtx();
+    const dir = dirOf(scope);
     const id = new URL(req.url).searchParams.get("id");
-    const { items } = await listItems("graphs/", 200);
+    const { items } = await listItems(dir, 200);
     const latest = new Map<string, (typeof items)[number]>();
     for (const it of items) {
-      const m = /^graphs\/\d{13}_(.+)\.json$/.exec(it.pathname);
+      const m = /^\d{13}_(.+)\.json$/.exec(it.pathname.slice(dir.length));
       if (m && !latest.has(m[1])) latest.set(m[1], it);
     }
     if (id) {
@@ -28,11 +34,12 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const { scope } = await requireCtx();
     const g = (await req.json()) as Partial<Graph>;
     const id = g.id && /^[a-z0-9-]{4,40}$/.test(g.id) ? g.id : randomUUID().slice(0, 12);
     const inv = String(9_999_999_999_999 - Date.now()).padStart(13, "0");
     const graph: Graph = { id, name: (g.name || "Без названия").slice(0, 80), nodes: g.nodes ?? [], edges: g.edges ?? [], savedAt: Date.now() };
-    await putJSON(`graphs/${inv}_${id}.json`, graph);
+    await putJSON(`${dirOf(scope)}${inv}_${id}.json`, graph);
     return NextResponse.json({ id });
   } catch (e) {
     return errorResponse(e);

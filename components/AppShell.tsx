@@ -5,7 +5,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AppProvider, useApp } from "./AppContext";
 import { ChatPanel } from "./ChatPanel";
 import { BalanceBar } from "./BalanceBar";
+import { MeProvider, useMe, type Me } from "./MeContext";
+import { AccountNotices } from "./AccountNotices";
 import { asset } from "@/lib/brand";
+import { Icon } from "./Icon";
 import { withBase } from "@/lib/base";
 
 const NAV = [
@@ -13,13 +16,19 @@ const NAV = [
   { href: "/video", label: "Видео", icon: "icon-video", key: "2" },
   { href: "/nodes", label: "Ноды", icon: "icon-nodes", key: "3" },
 ];
-const NavIcon = ({ name }: { name: string }) => <img className="navicon" src={asset(name)} alt="" draggable={false} />;
+// Свои картинки-иконки разделов; для служебных пунктов — SVG из Icon ("svg:имя")
+const NavIcon = ({ name }: { name: string }) => name.startsWith("svg:")
+  ? <span className="navicon navsvg"><Icon name={name.slice(4)} size={20} /></span>
+  : <img className="navicon" src={asset(name)} alt="" draggable={false} />;
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 
 function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const router = useRouter();
   const { chatOpen, setChatOpen, config } = useApp();
+  const me = useMe();
+  const admin = me.role === "admin";
+  const nav = admin ? [...NAV, { href: "/admin", label: "Админ", icon: "svg:user", key: "4" }] : NAV;
   const [menu, setMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -28,7 +37,7 @@ function Shell({ children }: { children: ReactNode }) {
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [menu]);
-  const missing = config && !config.mock
+  const missing = admin && config && !config.mock
     ? [!config.providers.google && "GEMINI_API_KEY", !config.providers.byteplus && "ARK_API_KEY", !config.providers.higgsfield && "HF_API_KEY"].filter(Boolean)
     : [];
 
@@ -38,13 +47,13 @@ function Shell({ children }: { children: ReactNode }) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "Escape" && chatOpen && !e.defaultPrevented && !document.querySelector(".modal-bg, .popover")) { setChatOpen(false); return; }
       if (typing(e.target)) return;
-      const nav = NAV.find((n) => n.key === e.key);
-      if (nav) { router.push(nav.href); return; }
+      const hit = nav.find((n) => n.key === e.key);
+      if (hit) { router.push(hit.href); return; }
       if (e.key.toLowerCase() === "c" || e.key.toLowerCase() === "с") setChatOpen(!chatOpen);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [chatOpen, setChatOpen, router]);
+  }, [chatOpen, setChatOpen, router, nav]);
 
   async function logout() {
     await fetch(withBase("/api/login"), { method: "DELETE" });
@@ -61,10 +70,19 @@ function Shell({ children }: { children: ReactNode }) {
           </button>
           {menu && (
             <div className="tb-menu">
+              {me.role === "user" && (
+                <div className="tb-menu-me">
+                  <b>{me.name}</b>
+                  <span className="muted">{me.email}</span>
+                </div>
+              )}
               <div className="tb-menu-keys">
-                <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> разделы</div>
+                <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>{admin && <kbd>4</kbd>} разделы</div>
                 <div><kbd>C</kbd> чат · <kbd>Esc</kbd> закрыть</div>
               </div>
+              <a className="tb-menu-item" href={withBase("/terms")} target="_blank" rel="noreferrer">
+                <NavIcon name="svg:info" /> Правила студии
+              </a>
               <button type="button" className="tb-menu-item danger" onClick={logout}>
                 <NavIcon name="icon-logout" /> Выйти
               </button>
@@ -72,7 +90,7 @@ function Shell({ children }: { children: ReactNode }) {
           )}
         </div>
         <nav className="tb-nav" aria-label="Разделы">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <Link key={n.href} href={n.href} className={`tb-tab ${path?.startsWith(n.href) ? "active" : ""}`} title={`${n.label} (${n.key})`}>
               <NavIcon name={n.icon} />
               <span>{n.label}</span>
@@ -80,7 +98,7 @@ function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="tb-right">
-          <BalanceBar />
+          {admin && <BalanceBar />}
           <button className={`tb-btn ${chatOpen ? "active" : ""}`} onClick={() => setChatOpen(!chatOpen)} title="Чат (C)">
             <NavIcon name="icon-chat" />
             <span>Чат</span>
@@ -88,6 +106,7 @@ function Shell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="main">
+        <AccountNotices />
         {config?.mock && <div className="banner">Тестовый режим: генерации не настоящие (MOCK_PROVIDERS=1)</div>}
         {config?.storageMissing && (
           <div className="banner warn">Не подключено хранилище: добавьте STORAGE_URL и STORAGE_SECRET в Vercel → Settings → Environment Variables и сделайте Redeploy. Без него не работают загрузка референсов и история.</div>
@@ -102,10 +121,12 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, me }: { children: ReactNode; me: Me }) {
   return (
-    <AppProvider>
-      <Shell>{children}</Shell>
-    </AppProvider>
+    <MeProvider me={me}>
+      <AppProvider>
+        <Shell>{children}</Shell>
+      </AppProvider>
+    </MeProvider>
   );
 }

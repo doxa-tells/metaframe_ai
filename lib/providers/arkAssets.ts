@@ -60,21 +60,24 @@ async function call(action: string, body: Record<string, unknown>): Promise<Reco
   return (json?.Result as Record<string, unknown>) ?? {};
 }
 
+// Группа ассетов: общая у владельца, отдельная у каждого пользователя («MetaFrame u…»)
 const GROUP_NAME = "MetaFrame refs";
-let groupId: string | null = null;
-export async function ensureGroup(): Promise<string> {
-  if (groupId) return groupId;
-  const list = await call("ListAssetGroups", { Filter: { GroupType: "AIGC", Name: GROUP_NAME }, MaxResults: 20, ProjectName: ARK_PROJECT() });
-  const found = ((list.Items ?? []) as { Id?: string; Name?: string }[]).find((g) => g.Name === GROUP_NAME && g.Id);
-  if (found?.Id) return (groupId = found.Id);
-  const created = await call("CreateAssetGroup", { Name: GROUP_NAME, Description: "Референсы из MetaFrame Studio", GroupType: "AIGC", ProjectName: ARK_PROJECT() });
-  return (groupId = String(created.Id));
+const groupIds = new Map<string, string>();
+export async function ensureGroup(name = GROUP_NAME): Promise<string> {
+  const known = groupIds.get(name);
+  if (known) return known;
+  const list = await call("ListAssetGroups", { Filter: { GroupType: "AIGC", Name: name }, MaxResults: 20, ProjectName: ARK_PROJECT() });
+  const found = ((list.Items ?? []) as { Id?: string; Name?: string }[]).find((g) => g.Name === name && g.Id);
+  if (found?.Id) { groupIds.set(name, found.Id); return found.Id; }
+  const created = await call("CreateAssetGroup", { Name: name, Description: name === GROUP_NAME ? "Референсы из MetaFrame Studio" : `Референсы пользователя MetaFrame Studio (${name.slice(10)})`, GroupType: "AIGC", ProjectName: ARK_PROJECT() });
+  groupIds.set(name, String(created.Id));
+  return String(created.Id);
 }
 
 export type AssetState = { id: string; status: "Processing" | "Active" | "Failed" | "Missing"; reason?: string };
 
-export async function createAsset(url: string, kind: "image" | "video", name: string): Promise<string> {
-  const gid = await ensureGroup();
+export async function createAsset(url: string, kind: "image" | "video", name: string, group?: string): Promise<string> {
+  const gid = await ensureGroup(group);
   const r = await call("CreateAsset", { GroupId: gid, URL: url, AssetType: kind === "video" ? "Video" : "Image", Name: name.slice(0, 60), ProjectName: ARK_PROJECT() });
   const id = String(r.Id ?? "");
   if (!id) throw new ArkAssetError("BytePlus не вернул id ассета", 502);
@@ -96,9 +99,9 @@ export async function getAsset(id: string): Promise<AssetState> {
 }
 
 // Удалить самые старые наши ассеты (бесплатный тариф — 50 штук на аккаунт)
+// Лимит общий на аккаунт, поэтому чистим самые старые из всех наших групп
 export async function pruneOldest(count: number): Promise<number> {
-  const gid = await ensureGroup();
-  const r = await call("ListAssets", { Filter: { GroupType: "AIGC", GroupIds: [gid] }, MaxResults: 100, SortBy: "CreateTime", SortOrder: "Asc", ProjectName: ARK_PROJECT() });
+  const r = await call("ListAssets", { Filter: { GroupType: "AIGC" }, MaxResults: 100, SortBy: "CreateTime", SortOrder: "Asc", ProjectName: ARK_PROJECT() });
   const items = ((r.Items ?? []) as { Id?: string }[]).filter((x) => x.Id).slice(0, count);
   let n = 0;
   for (const it of items) { try { await call("DeleteAsset", { Id: it.Id, ProjectName: ARK_PROJECT() }); n++; } catch { /* дальше */ } }

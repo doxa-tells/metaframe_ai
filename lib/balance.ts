@@ -2,6 +2,7 @@ import "server-only";
 import { getModel, type ProviderId } from "./models";
 import { listJobs } from "./jobs";
 import { listItems, putJSON, readJSON } from "./storage";
+import { listUsers } from "./users";
 
 // Баланс по провайдерам: пользователь вводит текущий остаток, студия вычитает стоимость генераций после этого момента.
 // (У Google, BytePlus и Higgsfield нет API остатка по обычным ключам.)
@@ -27,11 +28,13 @@ export async function getBalances(force = false): Promise<BalanceRow[]> {
   const spent: Record<string, number> = {};
   const count: Record<string, number> = {};
   if (Number.isFinite(sinceMin)) {
-    // Задачи хранятся от новых к старым — листаем, пока не дойдём до самой ранней точки отсчёта
-    for (const kind of ["image", "video"] as const) {
+    // Задачи хранятся от новых к старым — листаем, пока не дойдём до самой ранней точки отсчёта.
+    // Считаем и генерации пользователей: они идут с тех же ключей
+    const scopes = ["", ...(await listUsers().catch(() => [])).filter((u) => u.verifiedAt).map((u) => u.id)];
+    for (const scope of scopes) for (const kind of ["image", "video"] as const) {
       let cursor: string | undefined;
       for (let page = 0; page < 50; page++) {
-        const r = await listJobs(kind, cursor);
+        const r = await listJobs(kind, cursor, scope);
         let older = false;
         for (const j of r.jobs) {
           if (j.createdAt < sinceMin) { older = true; continue; }

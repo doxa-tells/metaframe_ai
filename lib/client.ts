@@ -10,7 +10,7 @@ export type Job = {
   id: string; kind: Kind; modelId: string; modeId: string; prompt: string;
   params: Record<string, unknown>; inputs: Record<string, string[]>; cost: number;
   provider: string; providerRequestId?: string; status: JobStatus; outputs: JobOutput[];
-  error?: string; createdAt: number; finishedAt?: number;
+  error?: string; createdAt: number; finishedAt?: number; userId?: string; ip?: string;
 };
 export const TERMINAL: JobStatus[] = ["completed", "failed", "nsfw", "canceled"];
 export const isTerminal = (s: JobStatus) => TERMINAL.includes(s);
@@ -44,7 +44,7 @@ export const pollJob = (job: Job) =>
   api<{ job: Partial<Job> & { id: string; status: JobStatus } }>("/api/jobs/poll", {
     method: "POST", body: JSON.stringify({ id: job.id, providerRequestId: job.providerRequestId }),
   }).then((r) => r.job);
-export const cancelJob = (job: Job) => api("/api/jobs/cancel", { method: "POST", body: JSON.stringify({ providerRequestId: job.providerRequestId }) });
+export const cancelJob = (job: Job) => api("/api/jobs/cancel", { method: "POST", body: JSON.stringify({ id: job.id, providerRequestId: job.providerRequestId }) });
 export const deleteJob = (id: string) => api(`/api/jobs/${id}`, { method: "DELETE" });
 export const bulkDelete = (items: { id: string; indexes?: number[] }[]) =>
   api<{ results: Record<string, string> }>("/api/jobs/bulk-delete", { method: "POST", body: JSON.stringify({ items }) }).then((r) => r.results);

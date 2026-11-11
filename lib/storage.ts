@@ -2,7 +2,7 @@ import "server-only";
 import { describeNetError, isNetworkError, withRetry } from "./net";
 import { promises as fs } from "fs";
 import path from "path";
-import { createHmac, randomUUID } from "crypto";
+import { createHmac, createHash, createCipheriv, createDecipheriv, randomBytes, randomUUID } from "crypto";
 import { put, list, del } from "@vercel/blob";
 import { BASE } from "./base";
 
@@ -165,6 +165,38 @@ export async function readJSON<T>(item: StoredItem | string): Promise<T | null> 
     const r = await fetch(url, { cache: "no-store" });
     if (!r.ok) return null;
     return (await r.json()) as T;
+  } catch { return null; }
+}
+
+// Личные данные (аккаунты, журнал модерации) шифруются: файлы в R2 читаются по прямой ссылке без ключа
+const privKey = () => createHash("sha256").update(`mf-private:${process.env.DATA_KEY || WORKER_SECRET || process.env.APP_PASSWORD || "local-dev"}`).digest();
+export async function putPrivateJSON(pathname: string, data: unknown): Promise<string> {
+  const iv = randomBytes(12);
+  const c = createCipheriv("aes-256-gcm", privKey(), iv);
+  const enc = Buffer.concat([c.update(JSON.stringify(data), "utf8"), c.final()]);
+  const body = `mfenc1:${iv.toString("base64")}:${c.getAuthTag().toString("base64")}:${enc.toString("base64")}`;
+  return putFile(pathname, body, "application/octet-stream");
+}
+export async function readPrivateJSON<T>(item: StoredItem | string): Promise<T | null> {
+  const url = typeof item === "string" ? item : item.url;
+  let txt: string | null = null;
+  const lk = localKeyOf(url);
+  if (storageMode === "local" && lk) {
+    try { txt = await fs.readFile(path.join(LOCAL_DIR, lk), "utf8"); } catch { return null; }
+  } else {
+    try {
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) return null;
+      txt = await r.text();
+    } catch { return null; }
+  }
+  const m = /^mfenc1:([^:]+):([^:]+):(.*)$/s.exec(txt.trim());
+  if (!m) return null;
+  try {
+    const d = createDecipheriv("aes-256-gcm", privKey(), Buffer.from(m[1], "base64"));
+    d.setAuthTag(Buffer.from(m[2], "base64"));
+    const plain = Buffer.concat([d.update(Buffer.from(m[3], "base64")), d.final()]).toString("utf8");
+    return JSON.parse(plain) as T;
   } catch { return null; }
 }
 

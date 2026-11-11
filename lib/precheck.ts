@@ -16,10 +16,12 @@ export type PrecheckResult = {
   skipped?: boolean; skipReason?: string; retryAfter?: number;
 };
 
-const pathOf = (url: string) => `precheck/seedance/${createHash("sha1").update(url).digest("hex")}.json`;
+// У каждого пользователя своя библиотека ассетов (как требует BytePlus) и свой кэш проверок
+const pathOf = (url: string, scope: string) => `precheck/seedance/${createHash("sha1").update(scope ? `${scope}|${url}` : url).digest("hex")}.json`;
+const groupOf = (scope: string) => (scope ? `MetaFrame ${scope}` : undefined);
 
-async function readRec(url: string): Promise<{ path: string; rec: PrecheckResult | null; item?: StoredItem }> {
-  const path = pathOf(url);
+async function readRec(url: string, scope: string): Promise<{ path: string; rec: PrecheckResult | null; item?: StoredItem }> {
+  const path = pathOf(url, scope);
   const { items } = await listItems(path, 1);
   const it = items.find((i) => i.pathname === path);
   return { path, rec: it ? await readJSON<PrecheckResult>(it) : null, item: it };
@@ -29,6 +31,10 @@ const dropRec = async (item?: StoredItem) => { if (item) await deleteItems([item
 const FAIL_TEXT = "BytePlus не пропустил реф: похоже на реального человека, чужого персонажа или запрещённый контент";
 const isThrottle = (e: unknown) => e instanceof ArkAssetError && (e.status === 429 || /Limit(Exceeded)?|Throttl|TooMany|FlowLimit/i.test(e.code ?? "")) && !/Quota/i.test(e.code ?? "");
 const isQuota = (e: unknown) => e instanceof ArkAssetError && /Quota|Exceed.*(Asset|Capacity)|Capacity/i.test(`${e.code} ${e.message}`);
+
+const NO_SUB = "Проверка рефов через библиотеку BytePlus доступна только на платной подписке Advanced/Premium в ModelArk. Для рефов с лицами переключитесь на «Seedance 2.5 · Higgsfield»";
+const isNoSubscription = (e: unknown) => e instanceof ArkAssetError && /SubscriptionRequired/i.test(`${e.code} ${e.message}`);
+let noSubscriptionUntil = 0;
 
 async function pollUntilDone(assetId: string, ms: number) {
   const until = Date.now() + ms;
@@ -40,10 +46,10 @@ async function pollUntilDone(assetId: string, ms: number) {
   return st;
 }
 
-export async function precheckSeedance(modelId: string, url: string, kind: "image" | "video", _origin: string): Promise<PrecheckResult> {
+export async function precheckSeedance(modelId: string, url: string, kind: "image" | "video", _origin: string, scope = ""): Promise<PrecheckResult> {
   const model = getModel(modelId);
   if (!model || model.provider !== "byteplus" || model.kind !== "video") return { ok: true, at: Date.now(), skipped: true };
-  const { path, rec, item } = await readRec(url);
+  const { path, rec, item } = await readRec(url, scope);
 
   if (MOCK) {
     if (rec) return rec;
@@ -60,17 +66,20 @@ export async function precheckSeedance(modelId: string, url: string, kind: "imag
   if (localKeyOf(url)) return { ok: true, at: Date.now(), skipped: true, skipReason: "Локальный файл — BytePlus не может его скачать" };
 
   if (rec?.status === "Active" || rec?.status === "Failed") return rec;
+  // Библиотека ассетов доступна только на платной подписке BytePlus — не дёргаем API зря
+  if (noSubscriptionUntil > Date.now()) return { ok: true, at: Date.now(), skipped: true, skipReason: NO_SUB };
 
   let assetId = rec?.assetId;
   if (!assetId) {
     try {
-      assetId = await createAsset(url, kind, `ref ${new Date().toISOString().slice(0, 16)}`);
+      assetId = await createAsset(url, kind, `ref ${new Date().toISOString().slice(0, 16)}`, groupOf(scope));
     } catch (e) {
+      if (isNoSubscription(e)) { noSubscriptionUntil = Date.now() + 10 * 60_000; return { ok: true, at: Date.now(), skipped: true, skipReason: NO_SUB }; }
       if (isThrottle(e)) return { ok: false, retryAfter: 20, at: Date.now() };
       if (!isQuota(e)) throw e;
       // Место в библиотеке закончилось — удаляем самые старые наши ассеты и пробуем ещё раз
       await pruneOldest(10);
-      assetId = await createAsset(url, kind, `ref ${new Date().toISOString().slice(0, 16)}`);
+      assetId = await createAsset(url, kind, `ref ${new Date().toISOString().slice(0, 16)}`, groupOf(scope));
     }
     await putJSON(path, { ok: true, assetId, status: "Processing", at: Date.now() } satisfies PrecheckResult);
   }
@@ -87,9 +96,9 @@ export async function precheckSeedance(modelId: string, url: string, kind: "imag
 }
 
 // Во время генерации: проверенный реф заменяем доверенной ссылкой asset://ID
-export async function arkInputFor(url: string): Promise<string | null> {
+export async function arkInputFor(url: string, scope = ""): Promise<string | null> {
   if (MOCK || !assetsConfigured()) return null;
-  const { path, rec, item } = await readRec(url);
+  const { path, rec, item } = await readRec(url, scope);
   if (!rec?.assetId) return null;
   if (rec.status === "Failed") throw new ProviderError(rec.reason ?? FAIL_TEXT, 400);
   if (rec.status === "Active") return `asset://${rec.assetId}`;
