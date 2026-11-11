@@ -4,6 +4,7 @@ import { humanizeError } from "./errors";
 import { listJobs, removeOutputs, jobScope, parseJobId, type JobRecord } from "./jobs";
 import { logAction, type ModAction } from "./modlog";
 import { putPrivateJSON, listItems, readJSON } from "./storage";
+import * as ledger from "./ledger";
 import { defaultDailyLimit, effectiveStatus, getUser, updateUser, type UserRecord } from "./users";
 
 const DAY = 86_400_000;
@@ -59,44 +60,45 @@ export async function spentLastDay(uid: string): Promise<number> {
   return Math.round(sum * 100) / 100;
 }
 
-export const limitOf = (u: UserRecord) => u.dailyLimit ?? defaultDailyLimit();
+export const limitOf = (u: UserRecord) => u.creditLimit ?? defaultDailyLimit();
 
-export async function assertWithinLimit(u: UserRecord, cost: number): Promise<void> {
-  const limit = limitOf(u);
-  const spent = await spentLastDay(u.id);
-  if (spent + cost > limit + 1e-9) {
-    throw Object.assign(new Error(`Суточный лимит $${limit} исчерпан (потрачено $${spent.toFixed(2)} за 24 часа). Попробуйте позже или попросите владельца поднять лимит`), { status: 429 });
-  }
+// ---------- Кредиты (журнал — lib/ledger) ----------
+const mirror = (uid: string, bal: number) => updateUser(uid, (u) => { u.bal = bal; }).catch(() => {});
+
+export async function chargeCredits(u: UserRecord, jobId: string, n: number): Promise<number> {
+  const s = await ledger.charge(u.id, jobId, n, { legacy: u.credits, dayLimit: limitOf(u) });
+  await mirror(u.id, s.balance);
+  return s.balance;
 }
 
-// ---------- Кредиты ----------
-const r2 = (n: number) => Math.round(n * 100) / 100;
-
-export async function chargeCredits(uid: string, n: number): Promise<void> {
-  if (!(n > 0)) return;
-  await updateUser(uid, (u) => {
-    const bal = u.credits ?? 0;
-    if (bal + 1e-9 < n) {
-      throw Object.assign(new Error(`Недостаточно кредитов: нужно ${r2(n)}, на балансе ${r2(bal)}. Пополните баланс в разделе «Кредиты»`), { status: 402 });
-    }
-    u.credits = r2(bal - n);
-  });
+export async function refundCredits(uid: string, jobId: string, n: number, note?: string): Promise<boolean> {
+  if (!(await ledger.refund(uid, jobId, n, note))) return false;
+  const u = await getUser(uid);
+  if (u) await mirror(uid, (await ledger.ledgerSummary(uid, u.credits)).balance);
+  return true;
 }
 
-export async function refundCredits(uid: string, n: number): Promise<void> {
-  if (!(n > 0)) return;
-  await updateUser(uid, (u) => { u.credits = r2((u.credits ?? 0) + n); });
+export async function creditSummary(u: UserRecord) {
+  const s = await ledger.ledgerSummary(u.id, u.credits);
+  if (u.bal !== s.balance) await mirror(u.id, s.balance);
+  return s;
 }
 
 export type AdminAction = "verify" | "reject" | "warn" | "freeze" | "unfreeze" | "ban" | "unban" | "limit" | "note" | "credit";
 
-export async function applyAction(uid: string, action: AdminAction, opts: { reason?: string; days?: number; limit?: number | null; jobId?: string; amount?: number }): Promise<UserRecord> {
+export async function applyAction(uid: string, action: AdminAction, opts: { reason?: string; days?: number; limit?: number | null; jobId?: string; amount?: number; receipt?: string }): Promise<UserRecord> {
   const reason = (opts.reason ?? "").trim().slice(0, 1000);
   const needReason: AdminAction[] = ["reject", "warn", "freeze", "ban"];
   if (needReason.includes(action) && !reason) throw Object.assign(new Error("Укажите причину"), { status: 400 });
   const now = Date.now();
   if (action === "credit" && !(Number.isFinite(opts.amount) && opts.amount !== 0)) throw Object.assign(new Error("Укажите количество кредитов"), { status: 400 });
-  let before = 0;
+  let before = 0, after = 0;
+  if (action === "credit") {
+    const cur = await getUser(uid, true);
+    if (!cur) throw Object.assign(new Error("Не найдено"), { status: 404 });
+    before = (await ledger.ledgerSummary(uid, cur.credits)).balance;
+    after = (await ledger.adjust(uid, opts.amount!, { receipt: opts.receipt, by: "admin", note: reason || undefined, legacy: cur.credits })).balance;
+  }
   const u = await updateUser(uid, (u) => {
     switch (action) {
       case "verify":
@@ -114,20 +116,19 @@ export async function applyAction(uid: string, action: AdminAction, opts: { reas
       case "unban":
         u.status = u.verifiedAt ? "active" : "pending"; u.statusReason = undefined; u.frozenUntil = undefined; break;
       case "limit":
-        u.dailyLimit = opts.limit === null || opts.limit === undefined ? undefined : Math.max(0, Math.min(10000, opts.limit)); break;
+        u.creditLimit = opts.limit === null || opts.limit === undefined ? undefined : Math.max(0, Math.min(1_000_000, opts.limit)); break;
       case "note":
         u.note = reason || undefined; break;
       case "credit":
-        before = u.credits ?? 0;
-        u.credits = r2(Math.max(0, before + (opts.amount ?? 0)));
+        u.bal = after;
         if ((opts.amount ?? 0) > 0) u.payClaim = undefined; // оплата учтена
         break;
     }
   });
   await logAction({
     actor: "admin", action: action as ModAction, userId: uid, email: u.email, jobId: opts.jobId, reason: reason || undefined,
-    meta: action === "freeze" ? { days: opts.days ?? null } : action === "limit" ? { limit: u.dailyLimit ?? null }
-      : action === "credit" ? { amount: opts.amount, before, after: u.credits } : undefined,
+    meta: action === "freeze" ? { days: opts.days ?? null } : action === "limit" ? { limit: u.creditLimit ?? null }
+      : action === "credit" ? { amount: opts.amount, before, after, ...(opts.receipt ? { receipt: opts.receipt } : {}) } : undefined,
   });
   return u;
 }

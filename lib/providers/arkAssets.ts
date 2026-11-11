@@ -69,7 +69,14 @@ export async function ensureGroup(name = GROUP_NAME): Promise<string> {
   const list = await call("ListAssetGroups", { Filter: { GroupType: "AIGC", Name: name }, MaxResults: 20, ProjectName: ARK_PROJECT() });
   const found = ((list.Items ?? []) as { Id?: string; Name?: string }[]).find((g) => g.Name === name && g.Id);
   if (found?.Id) { groupIds.set(name, found.Id); return found.Id; }
-  const created = await call("CreateAssetGroup", { Name: name, Description: name === GROUP_NAME ? "Референсы из MetaFrame Studio" : `Референсы пользователя MetaFrame Studio (${name.slice(10)})`, GroupType: "AIGC", ProjectName: ARK_PROJECT() });
+  let created: Record<string, unknown>;
+  try {
+    created = await call("CreateAssetGroup", { Name: name, Description: name === GROUP_NAME ? "Референсы из MetaFrame Studio" : `Референсы пользователя MetaFrame Studio (${name.slice(10)})`, GroupType: "AIGC", ProjectName: ARK_PROJECT() });
+  } catch (e) {
+    // Групп на тарифе 50: когда закончились, новые пользователи идут в общую группу
+    if (name !== GROUP_NAME && e instanceof ArkAssetError && /Quota|Exceed|Limit|Capacity/i.test(`${e.code} ${e.message}`) && !/SubscriptionRequired/i.test(`${e.code}`)) return ensureGroup(GROUP_NAME);
+    throw e;
+  }
   groupIds.set(name, String(created.Id));
   return String(created.Id);
 }
@@ -96,6 +103,38 @@ export async function getAsset(id: string): Promise<AssetState> {
     if (e instanceof ArkAssetError && (e.status === 404 || /NotFound/i.test(e.code ?? ""))) return { id, status: "Missing" };
     throw e;
   }
+}
+
+// Статусы недавних ассетов одним запросом ListAssets (кэш на 8 с): вместо GetAsset на каждый реф
+// при множестве одновременных проверок уходит один запрос раз в несколько секунд
+let recent: { at: number; map: Map<string, AssetState> } | null = null;
+let recentLoading: Promise<Map<string, AssetState>> | null = null;
+export async function recentStatuses(): Promise<Map<string, AssetState>> {
+  if (recent && Date.now() - recent.at < 8_000) return recent.map;
+  if (recentLoading) return recentLoading;
+  recentLoading = (async () => {
+    const r = await call("ListAssets", { Filter: { GroupType: "AIGC" }, MaxResults: 100, SortBy: "CreateTime", SortOrder: "Desc", ProjectName: ARK_PROJECT() });
+    const map = new Map<string, AssetState>();
+    for (const it of (r.Items ?? []) as Record<string, unknown>[]) {
+      const id = String(it.Id ?? "");
+      const status = typeof it.Status === "string" ? (it.Status as AssetState["status"]) : null;
+      if (!id || !status) continue;
+      const reasonSrc = [it.FailedReason, it.FailReason, it.Reason, it.Message].find((x) => typeof x === "string" && (x as string).trim());
+      map.set(id, { id, status, reason: reasonSrc as string | undefined });
+    }
+    recent = { at: Date.now(), map };
+    return map;
+  })().finally(() => { recentLoading = null; });
+  return recentLoading;
+}
+
+// Статус одного ассета: сначала из общего списка, если его там нет — GetAsset
+export async function assetStatus(id: string): Promise<AssetState> {
+  try {
+    const hit = (await recentStatuses()).get(id);
+    if (hit) return hit;
+  } catch { /* список недоступен — спросим напрямую */ }
+  return getAsset(id);
 }
 
 // Удалить самые старые наши ассеты (бесплатный тариф — 50 штук на аккаунт)

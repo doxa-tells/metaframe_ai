@@ -52,12 +52,16 @@ async function workerFetch(input: string, init: RequestInit = {}): Promise<Respo
 }
 
 // Подписанная ссылка для загрузки файла прямо из браузера в R2 (действует 15 минут)
-export function signUpload(fileName: string): { uploadUrl: string; url: string } {
+// max — предельный размер в байтах: входит в подпись, воркер отклоняет файл больше (после обновления воркера)
+export function signUpload(fileName: string, max?: number): { uploadUrl: string; url: string } {
   const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-60) || "file";
   const key = `uploads/${randomUUID().slice(0, 12)}-${safe}`;
   const exp = Math.floor(Date.now() / 1000) + 15 * 60;
   const sig = createHmac("sha256", WORKER_SECRET).update(`${key}:${exp}`).digest("hex");
-  return { uploadUrl: `${workerUrl(key)}?exp=${exp}&sig=${sig}`, url: workerUrl(key) };
+  if (!max) return { uploadUrl: `${workerUrl(key)}?exp=${exp}&sig=${sig}`, url: workerUrl(key) };
+  const sig2 = createHmac("sha256", WORKER_SECRET).update(`${key}:${exp}:${max}`).digest("hex");
+  // sig — для старой версии воркера, sig2 + max — для новой (она проверяет размер)
+  return { uploadUrl: `${workerUrl(key)}?exp=${exp}&sig=${sig}&max=${max}&sig2=${sig2}`, url: workerUrl(key) };
 }
 const LOCAL_DIR = path.join(process.cwd(), ".data");
 

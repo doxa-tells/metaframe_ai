@@ -999,3 +999,10 @@ input[type=email]:focus, input[type=tel]:focus { border-color: #2b4c5b; }
 .ud-credits { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid #13442b; border-radius: 12px; background: #04130b; }
 .ud-credits input { width: 120px; padding: 5px 8px; }
 .ud-claim { color: #6ff0a0; line-height: 1.5; }
+
+/* Журнал кредитов в карточке пользователя */
+.ud-receipt { width: 140px; }
+.ud-ledger summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
+.ud-ledger-row { display: grid; grid-template-columns: 130px 1fr auto; gap: 10px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+.ud-ledger-row b.neg { color: #ff8a8a; }
+.ud-ledger-row b.pos { color: #6ff0a0; }

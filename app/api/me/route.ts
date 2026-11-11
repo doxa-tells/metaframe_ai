@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { errorResponse } from "@/lib/http";
 import { requireCtx } from "@/lib/me";
-import { limitOf, spentLastDay } from "@/lib/moderation";
+import { creditSummary, limitOf } from "@/lib/moderation";
+import { sweepPending } from "@/lib/jobs";
 import { updateUser } from "@/lib/users";
 import { logAction } from "@/lib/modlog";
 import { getPackage } from "@/lib/packages";
@@ -10,16 +11,18 @@ import { getPackage } from "@/lib/packages";
 export async function GET(req: Request) {
   try {
     const me = await requireCtx();
+    after(() => sweepPending().catch((e) => console.error("sweep:", (e as Error).message)));
     if (me.admin) return NextResponse.json({ role: "admin" });
     const u = me.user!;
     const withSpent = new URL(req.url).searchParams.has("spent");
+    const cs = await creditSummary(u);
     return NextResponse.json({
       role: "user",
       id: u.id, name: u.name, email: u.email, status: me.status, statusReason: u.statusReason, frozenUntil: u.frozenUntil,
-      credits: u.credits ?? 0, payClaim: u.payClaim ?? null,
+      credits: cs.balance, payClaim: u.payClaim ?? null,
       warnings: (u.warnings ?? []).filter((w) => !w.ack).map(({ id, at, reason }) => ({ id, at, reason })),
       limit: limitOf(u),
-      ...(withSpent ? { spent: await spentLastDay(u.id) } : {}),
+      ...(withSpent ? { spent: cs.dayCharged } : {}),
     });
   } catch (e) {
     return errorResponse(e);

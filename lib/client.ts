@@ -66,7 +66,7 @@ export async function uploadFile(file: File, storage: "worker" | "blob" | "local
   if (storage === "worker") {
     if (file.size > 95 * 1024 * 1024) throw new Error("Файл больше 95 МБ");
     const { uploadUrl, url } = await api<{ uploadUrl: string; url: string }>("/api/upload/sign", {
-      method: "POST", body: JSON.stringify({ name: file.name, contentType: file.type }),
+      method: "POST", body: JSON.stringify({ name: file.name, contentType: file.type, size: file.size }),
     });
     const r = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } });
     if (!r.ok) throw new Error(`Не удалось загрузить файл (${r.status})`);

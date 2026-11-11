@@ -4,6 +4,7 @@ import { MOCK } from "@/lib/jobs";
 import { errorResponse, requestOrigin } from "@/lib/http";
 import { toAbsolute } from "@/lib/storage";
 import { requireCtx } from "@/lib/me";
+import { LIMITS, overQuota, quotaError } from "@/lib/usage";
 import { updateUser } from "@/lib/users";
 import { logAction } from "@/lib/modlog";
 
@@ -30,6 +31,10 @@ export async function POST(req: Request) {
     if (!name?.trim()) return NextResponse.json({ error: "Укажите имя" }, { status: 400 });
     if (!images?.length) return NextResponse.json({ error: "Добавьте фото" }, { status: 400 });
     if (images.length > 100) return NextResponse.json({ error: "Максимум 100 фото" }, { status: 400 });
+    if (me.user) {
+      if ((me.user.souls ?? []).length >= LIMITS.soulTotal()) throw quotaError(`Максимум ${LIMITS.soulTotal()} персонажей Soul ID на аккаунт — напишите владельцу, если нужно больше`);
+      if (await overQuota(`soul:${me.uid}`, LIMITS.soulPerDay(), 86_400_000)) throw quotaError(`Не больше ${LIMITS.soulPerDay()} новых Soul ID в сутки`);
+    }
     const origin = requestOrigin(req);
     const item = MOCK
       ? { id: `mock-${Date.now()}`, name, status: "in_progress" }

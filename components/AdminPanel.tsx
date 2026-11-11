@@ -9,12 +9,14 @@ import { formatCredits } from "@/lib/credits";
 import { formatTenge, getPackage, PACKAGES } from "@/lib/packages";
 
 type Status = "pending" | "active" | "frozen" | "banned" | "rejected";
+type Hist = { type: string; ref: string; amount: number; at?: number; pathname: string; note?: string };
+const LEDGER_LABEL: Record<string, string> = { init: "Перенос баланса", charge: "Генерация", refund: "Возврат", pay: "Оплата", adj: "Корректировка" };
 type Warn = { id: string; at: number; reason: string; jobId?: string; ack?: number };
 type User = {
   id: string; email: string; name: string; phone: string; country: string; purpose: string; status: Status;
   statusReason?: string; frozenUntil?: number; createdAt: number; createdIp?: string; lastLoginAt?: number; lastIp?: string;
   verifiedAt?: number; verifyNote?: string; consent?: { version: string; at: number; ip?: string };
-  warnings: Warn[]; blockedTotal: number; blockedDay?: number; dailyLimit?: number; note?: string; souls?: string[];
+  warnings: Warn[]; blockedTotal: number; blockedDay?: number; dailyLimit?: number; creditLimit?: number; note?: string; souls?: string[];
   credits?: number; payClaim?: { pkg: string; credits: number; price: number; at: number };
 };
 type Entry = { id: string; at: number; actor: string; action: string; userId?: string; email?: string; jobId?: string; reason?: string; meta?: Record<string, unknown> };
@@ -140,6 +142,9 @@ function UserDetail({ uid, focusJob, onChanged, onClose }: { uid: string; focusJ
   const [u, setU] = useState<User | null>(null);
   const [limit, setLimit] = useState<number | null>(null);
   const [spent, setSpent] = useState<number | null>(null);
+  const [spentUsd, setSpentUsd] = useState<number | null>(null);
+  const [history, setHistory] = useState<Hist[]>([]);
+  const [receipt, setReceipt] = useState("");
   const [reason, setReason] = useState("");
   const [days, setDays] = useState("7");
   const [limitIn, setLimitIn] = useState("");
@@ -149,10 +154,10 @@ function UserDetail({ uid, focusJob, onChanged, onClose }: { uid: string; focusJ
   const [logRev, setLogRev] = useState(0);
 
   useEffect(() => {
-    call<{ user: User; limit: number; spent: number }>(`/api/admin/users/${uid}`)
-      .then((d) => { setU(d.user); setLimit(d.limit); setSpent(d.spent); setLimitIn(d.user.dailyLimit !== undefined ? String(d.user.dailyLimit) : ""); })
+    call<{ user: User; limit: number; spent: number; spentUsd: number; history: Hist[] }>(`/api/admin/users/${uid}`)
+      .then((d) => { setU(d.user); setLimit(d.limit); setSpent(d.spent); setSpentUsd(d.spentUsd); setHistory(d.history ?? []); setLimitIn(d.user.creditLimit !== undefined ? String(d.user.creditLimit) : ""); })
       .catch((e) => setMsg((e as Error).message));
-  }, [uid]);
+  }, [uid, logRev]);
 
   async function act(action: string, extra: Record<string, unknown> = {}, confirmText?: string) {
     if (confirmText && !window.confirm(confirmText)) return;
@@ -161,7 +166,7 @@ function UserDetail({ uid, focusJob, onChanged, onClose }: { uid: string; focusJ
       const d = await call<{ user: User; limit: number }>(`/api/admin/users/${uid}`, { method: "POST", body: JSON.stringify({ action, reason, ...extra }) });
       setU(d.user); setLimit(d.limit); onChanged(d.user);
       if (action !== "limit" && action !== "credit") setReason("");
-      if (action === "credit") setCreditIn("");
+      if (action === "credit") { setCreditIn(""); setReceipt(""); }
       setMsg("Сохранено");
       setLogRev((r) => r + 1);
     } catch (e) { setMsg((e as Error).message); }
@@ -191,7 +196,7 @@ function UserDetail({ uid, focusJob, onChanged, onClose }: { uid: string; focusJ
         <div><span>Согласие с правилами</span>{u.consent ? `${u.consent.version}, ${dt(u.consent.at)}` : "—"}</div>
         <div><span>Личность подтверждена</span>{u.verifiedAt ? `${dt(u.verifiedAt)}${u.verifyNote ? ` — ${u.verifyNote}` : ""}` : "нет"}</div>
         <div><span>Кредиты</span><b>{formatCredits(u.credits ?? 0)}</b></div>
-        <div><span>Себестоимость за 24 ч</span>${(spent ?? 0).toFixed(2)} из лимита ${limit ?? "?"}</div>
+        <div><span>Списано за 24 ч</span>{formatCredits(spent ?? 0)} из лимита {limit ?? "?"} кр. · себестоимость ${(spentUsd ?? 0).toFixed(2)}</div>
         <div><span>Модерация провайдеров</span>{u.blockedTotal} всего · {u.blockedDay ?? 0} за сутки</div>
         {u.statusReason && <div className="wide"><span>Причина статуса</span>{u.statusReason}{u.frozenUntil ? ` (до ${dt(u.frozenUntil)})` : ""}</div>}
         {u.purpose && <div className="wide"><span>Цель</span>{u.purpose}</div>}
@@ -205,17 +210,31 @@ function UserDetail({ uid, focusJob, onChanged, onClose }: { uid: string; focusJ
           </div>
         )}
         <div className="ud-btns">
+          <input className="ud-receipt" placeholder="№ чека Kaspi" value={receipt} onChange={(e) => setReceipt(e.target.value)} title="Один чек нельзя учесть дважды" />
           <span className="small muted">Начислить:</span>
           {PACKAGES.map((p) => (
             <button key={p.id} className={`btn small ${u.payClaim?.pkg === p.id ? "accent" : ""}`} disabled={busy}
-              onClick={() => act("credit", { amount: p.credits, reason: `Kaspi: пакет ${p.name}, ${formatTenge(p.price)}` }, `Начислить ${p.credits} кредитов (пакет ${p.name}, ${formatTenge(p.price)})?`)}>
+              onClick={() => act("credit", { amount: p.credits, receipt: receipt.trim() || undefined, reason: `Kaspi: пакет ${p.name}, ${formatTenge(p.price)}` }, `Начислить ${p.credits} кредитов (пакет ${p.name}, ${formatTenge(p.price)})${receipt.trim() ? ` по чеку ${receipt.trim()}` : " без номера чека"}?`)}>
               +{formatCredits(p.credits)} · {p.name}
             </button>
           ))}
           <input type="number" step={1} placeholder="другое (±)" value={creditIn} onChange={(e) => setCreditIn(e.target.value)} />
-          <button className="btn small" disabled={busy || !Number(creditIn)} onClick={() => act("credit", { amount: Number(creditIn), reason: reason.trim() || "Ручная корректировка" }, `${Number(creditIn) > 0 ? "Начислить" : "Списать"} ${Math.abs(Number(creditIn))} кредитов?`)}>Применить</button>
+          <button className="btn small" disabled={busy || !Number(creditIn)} onClick={() => act("credit", { amount: Number(creditIn), receipt: Number(creditIn) > 0 && receipt.trim() ? receipt.trim() : undefined, reason: reason.trim() || "Ручная корректировка" }, `${Number(creditIn) > 0 ? "Начислить" : "Списать"} ${Math.abs(Number(creditIn))} кредитов?`)}>Применить</button>
         </div>
       </div>
+
+      {history.length > 0 && (
+        <details className="ud-block ud-ledger">
+          <summary>Движение кредитов ({history.length})</summary>
+          {history.map((h) => (
+            <div key={h.pathname} className="ud-ledger-row small">
+              <span className="muted">{h.at ? dt(h.at) : "—"}</span>
+              <span>{LEDGER_LABEL[h.type] ?? h.type}{h.type === "pay" ? ` · чек ${h.ref.replace(/^\d{13}-/, "")}` : h.type === "charge" || h.type === "refund" ? ` · ${h.ref.split("_").slice(0, 3).join("_")}` : ""}{h.note ? ` — ${h.note}` : ""}</span>
+              <b className={h.amount < 0 ? "neg" : "pos"}>{h.amount > 0 ? "+" : ""}{formatCredits(h.amount)}</b>
+            </div>
+          ))}
+        </details>
+      )}
 
       <div className="ud-actions">
         <textarea rows={2} placeholder={reasonHint} value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -237,7 +256,7 @@ function UserDetail({ uid, focusJob, onChanged, onClose }: { uid: string; focusJ
           <button className="btn small" disabled={busy || !reason.trim()} onClick={() => act("note")} title="Сохранить текст как заметку (пользователь не видит)">Заметка</button>
         </div>
         <div className="ud-limit">
-          <span className="small muted">Лимит $ в сутки</span>
+          <span className="small muted">Лимит кредитов в сутки</span>
           <input type="number" min={0} step={1} placeholder={`по умолчанию ${limit ?? ""}`} value={limitIn} onChange={(e) => setLimitIn(e.target.value)} />
           <button className="btn small" disabled={busy} onClick={() => act("limit", { limit: limitIn.trim() === "" ? null : Number(limitIn) })}>Сохранить</button>
         </div>

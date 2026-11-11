@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { errorResponse } from "@/lib/http";
 import { requireCtx } from "@/lib/me";
-import { applyAction, limitOf, spentLastDay, type AdminAction } from "@/lib/moderation";
+import { applyAction, creditSummary, limitOf, spentLastDay, type AdminAction } from "@/lib/moderation";
+import { ledgerHistory } from "@/lib/ledger";
 import { getUser, publicUser, validUid } from "@/lib/users";
 
 const ACTIONS: AdminAction[] = ["verify", "reject", "warn", "freeze", "unfreeze", "ban", "unban", "limit", "note", "credit"];
@@ -12,7 +13,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     const { id } = await ctx.params;
     const u = validUid(id) ? await getUser(id, true) : null;
     if (!u) return NextResponse.json({ error: "Не найдено" }, { status: 404 });
-    return NextResponse.json({ user: publicUser(u), limit: limitOf(u), spent: await spentLastDay(u.id) });
+    const [cs, spentUsd, history] = await Promise.all([creditSummary(u), spentLastDay(u.id), ledgerHistory(u.id)]);
+    return NextResponse.json({ user: { ...publicUser(u), credits: cs.balance }, limit: limitOf(u), spent: cs.dayCharged, spentUsd, history });
   } catch (e) {
     return errorResponse(e);
   }
@@ -24,9 +26,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     await requireCtx({ admin: true });
     const { id } = await ctx.params;
     if (!validUid(id)) return NextResponse.json({ error: "Некорректный id" }, { status: 400 });
-    const b = (await req.json()) as { action?: AdminAction; reason?: string; days?: number; limit?: number | null; amount?: number };
+    const b = (await req.json()) as { action?: AdminAction; reason?: string; days?: number; limit?: number | null; amount?: number; receipt?: string };
     if (!b.action || !ACTIONS.includes(b.action)) return NextResponse.json({ error: "Неизвестное действие" }, { status: 400 });
-    const u = await applyAction(id, b.action, { reason: b.reason, days: Number(b.days) || undefined, limit: b.limit === null ? null : b.limit === undefined ? undefined : Number(b.limit), amount: Number(b.amount) });
+    const u = await applyAction(id, b.action, { reason: b.reason, days: Number(b.days) || undefined, limit: b.limit === null ? null : b.limit === undefined ? undefined : Number(b.limit), amount: Number(b.amount), receipt: typeof b.receipt === "string" && b.receipt.trim() ? b.receipt : undefined });
     return NextResponse.json({ user: publicUser(u), limit: limitOf(u) });
   } catch (e) {
     return errorResponse(e);

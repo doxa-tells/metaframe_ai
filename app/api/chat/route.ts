@@ -2,6 +2,7 @@ import { googleKey, GEMINI_CHAT_MODEL, fetchAsInline } from "@/lib/providers/goo
 import { localKeyOf, readLocalFile, toAbsolute } from "@/lib/storage";
 import { errorResponse, requestOrigin } from "@/lib/http";
 import { requireCtx } from "@/lib/me";
+import { LIMITS, overQuota, quotaError } from "@/lib/usage";
 
 export const maxDuration = 120;
 
@@ -44,7 +45,13 @@ async function readSSE(res: Response, onData: (json: Record<string, unknown>) =>
 }
 
 export async function POST(req: Request) {
-  try { await requireCtx({ active: true }); } catch (e) { return errorResponse(e); }
+  try {
+    const me = await requireCtx({ active: true });
+    // Чат с ИИ бесплатный для пользователя, поэтому ограничен числом сообщений в сутки
+    if (me.user && LIMITS.chatPerDay() > 0 && (await overQuota(`chat:${me.uid}`, LIMITS.chatPerDay(), 86_400_000))) {
+      throw quotaError(`Лимит ассистента — ${LIMITS.chatPerDay()} сообщений в сутки. Продолжите завтра`);
+    }
+  } catch (e) { return errorResponse(e); }
   const body = (await req.json()) as Body;
   const origin = requestOrigin(req);
   // Без правил по умолчанию: системный промпт — только инструкции проекта, если они есть

@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { listJobs } from "@/lib/jobs";
+import { NextResponse, after } from "next/server";
+import { listJobs, sweepPending } from "@/lib/jobs";
 import { errorResponse } from "@/lib/http";
 import { requireCtx } from "@/lib/me";
 
@@ -7,6 +7,7 @@ import { requireCtx } from "@/lib/me";
 export async function GET(req: Request) {
   try {
     const { scope } = await requireCtx();
+    after(() => sweepPending().catch((e) => console.error("sweep:", (e as Error).message)));
     const u = new URL(req.url);
     const kind = u.searchParams.get("kind") === "video" ? "video" : "image";
     const cursor = u.searchParams.get("cursor") || undefined;

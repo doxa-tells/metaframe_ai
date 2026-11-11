@@ -4,7 +4,7 @@ import {
   GenRequest, Kind, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, resolveRequest, buildOmniPlan, ARK_MODEL_IDS,
 } from "./models";
 import { describeNetError } from "./net";
-import { putFile, putJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, localKeyOf, StoredItem } from "./storage";
+import { putFile, putJSON, putPrivateJSON, readPrivateJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, localKeyOf, StoredItem } from "./storage";
 import * as hf from "./providers/higgsfield";
 import { nanoBananaGenerate, fetchAsInline, omniSubmit, omniStatus, omniDownload, omniCancel, omniDelete } from "./providers/google";
 import * as ark from "./providers/byteplus";
@@ -171,6 +171,7 @@ function mockSvg(prompt: string, seed: number, aspect = "3:4"): string {
 const SYNC_TIMEOUT_MS = 330_000;
 async function runSync(base: JobRecord, work: () => Promise<Partial<JobRecord>>): Promise<JobRecord> {
   await putJSON(pendingPath(base.id), { ...base, status: "in_progress", providerRequestId: `sync:${base.createdAt}` });
+  await markPending(base.id, `sync:${base.createdAt}`);
   let rec: JobRecord;
   try {
     rec = { ...base, ...(await work()), finishedAt: Date.now() };
@@ -185,7 +186,7 @@ async function runSync(base: JobRecord, work: () => Promise<Partial<JobRecord>>)
   return rec;
 }
 
-export async function createJob(asked: GenRequest, origin: string, who: { uid?: string; ip?: string; souls?: string[]; credits?: number } = {}): Promise<JobRecord> {
+export async function createJob(asked: GenRequest, origin: string, who: { id?: string; uid?: string; ip?: string; souls?: string[]; credits?: number } = {}): Promise<JobRecord> {
   const err = validateRequest(asked);
   if (err) throw new hf.ProviderError(err, 400);
   // Пользователь может брать только своих персонажей Soul ID
@@ -197,7 +198,7 @@ export async function createJob(asked: GenRequest, origin: string, who: { uid?: 
   const req = resolveRequest(asked);
   const model = getModel(req.modelId)!;
   const mode = getMode(model, asked.modeId);
-  const id = newJobId(model.kind, who.uid ?? "");
+  const id = who.id && jobScope(who.id) === (who.uid ?? "") && parseJobId(who.id)?.kind === model.kind ? who.id : newJobId(model.kind, who.uid ?? "");
   const base: JobRecord = {
     id, kind: model.kind, modelId: model.id, modeId: mode.id,
     prompt: (asked.prompt ?? "").trim(), params: asked.params ?? {}, inputs: asked.inputs ?? {},
@@ -223,6 +224,7 @@ export async function createJob(asked: GenRequest, origin: string, who: { uid?: 
     }
     const rec = { ...base, providerRequestId: `mock:${Date.now()}` };
     await putJSON(pendingPath(id), rec);
+    await markPending(id, rec.providerRequestId!);
     return rec;
   }
 
@@ -239,6 +241,7 @@ export async function createJob(asked: GenRequest, origin: string, who: { uid?: 
     const iid = await omniSubmit(body);
     const rec: JobRecord = { ...base, providerRequestId: `omni:${iid}` };
     await putJSON(pendingPath(id), rec);
+    await markPending(id, rec.providerRequestId!);
     return rec;
   }
 
@@ -282,6 +285,7 @@ export async function createJob(asked: GenRequest, origin: string, who: { uid?: 
       const taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: conv }, arkModel));
       const rec: JobRecord = { ...base, providerRequestId: `ark:${taskId}` };
       await putJSON(pendingPath(id), rec);
+    await markPending(id, rec.providerRequestId!);
       return rec;
     }
     return runSync(base, async () => {
@@ -306,6 +310,7 @@ export async function createJob(asked: GenRequest, origin: string, who: { uid?: 
   const sub = await hf.submit(endpoint, body, id);
   const rec: JobRecord = { ...base, providerRequestId: sub.request_id, status: (sub.status as JobStatus) || "queued" };
   await putJSON(pendingPath(id), rec);
+    await markPending(id, rec.providerRequestId!);
   return rec;
 }
 
@@ -337,14 +342,72 @@ async function finalize(id: string, patch: Partial<JobRecord>): Promise<JobRecor
 
 // Срабатывания модерации провайдеров у пользователей учитываем (lib/moderation)
 // Неудачная, отменённая или заблокированная генерация — кредиты возвращаются пользователю
+// Метки незавершённых задач: по ним сервер сам доводит задачи, даже если вкладку закрыли
+const markPath = (id: string) => `pending-index/${id}.json`;
+async function markPending(id: string, providerRequestId: string) {
+  await putPrivateJSON(markPath(id), { id, providerRequestId, at: Date.now() }).catch(() => {});
+}
+async function dropPendingMark(id: string) {
+  const p = markPath(id);
+  const { items } = await listItems(p, 1).catch(() => ({ items: [] as StoredItem[] }));
+  const it = items.find((i) => i.pathname === p);
+  if (it) await deleteItems([it]).catch(() => {});
+}
+
+let lastSweep = 0;
+// Фоновая доводка: задачи старше 2 минут без живого опроса из браузера опрашиваем сами
+// (возврат кредитов за неудачные и сохранение результата не зависят от того, открыта ли вкладка)
+export async function sweepPending(opts: { force?: boolean; budgetMs?: number } = {}): Promise<{ checked: number; finished: number }> {
+  const now = Date.now();
+  if (!opts.force && now - lastSweep < (Number(process.env.SWEEP_EVERY_MS) || 60_000)) return { checked: 0, finished: 0 };
+  lastSweep = now;
+  const deadline = now + (opts.budgetMs ?? 20_000);
+  const { items } = await listItems("pending-index/", 200);
+  let checked = 0, finished = 0;
+  const queue = [...items];
+  async function worker() {
+    for (let it = queue.shift(); it && Date.now() < deadline; it = queue.shift()) {
+      const m = await readPrivateJSON<{ id: string; providerRequestId: string; at: number }>(it);
+      if (!m?.id || !parseJobId(m.id)) { await deleteItems([it]).catch(() => {}); continue; }
+      const age = Date.now() - m.at;
+      if (age < (Number(process.env.SWEEP_MIN_AGE_MS) || 120_000)) continue;
+      checked++;
+      try {
+        const files = await findJobFiles(m.id);
+        if (!files.pending) { await deleteItems([it]).catch(() => {}); finished++; continue; } // уже готова или удалена
+        const r = await pollJob(m.id, m.providerRequestId);
+        if (TERMINAL.includes(r.status)) { await deleteItems([it]).catch(() => {}); finished++; }
+      } catch (e) {
+        console.error("sweepPending:", m.id, (e as Error).message);
+        if (age > 3 * 86_400_000) await deleteItems([it]).catch(() => {});
+      }
+    }
+  }
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  return { checked, finished };
+}
+
 async function afterDone(rec: JobRecord) {
-  if (!rec.userId || rec.status === "completed") return;
+  await dropPendingMark(rec.id);
+  if (!rec.userId) return;
   const mod = await import("./moderation");
   if (rec.credits) {
-    try { await mod.refundCredits(rec.userId, rec.credits); }
-    catch (e) { console.error("refundCredits:", (e as Error).message); }
+    // Картинок пришло меньше, чем заказано, — возвращаем долю за недоданные
+    let back = 0, note = "";
+    if (rec.status !== "completed") { back = rec.credits; note = rec.status; }
+    else if (rec.kind === "image") {
+      const asked = Math.max(1, Number(rec.params?.count ?? rec.params?.batch_size ?? 1) || 1);
+      const got = rec.outputs.length;
+      if (got > 0 && got < asked) { back = Math.round((rec.credits * (asked - got) / asked) * 100) / 100; note = `получено ${got} из ${asked}`; }
+    }
+    if (back > 0) {
+      try {
+        // Возврат по задаче бывает только один: если его уже сделал параллельный опрос — нарушение тоже уже учтено
+        if (!(await mod.refundCredits(rec.userId, rec.id, back, note)) && rec.status !== "completed") return;
+      } catch (e) { console.error("refundCredits:", (e as Error).message); }
+    }
   }
-  if (rec.status === "canceled") return;
+  if (rec.status === "completed" || rec.status === "canceled") return;
   try { await mod.noteBlocked(rec); }
   catch (e) { console.error("noteBlocked:", (e as Error).message); }
 }

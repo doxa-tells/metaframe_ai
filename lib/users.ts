@@ -32,9 +32,11 @@ export type UserRecord = {
   warnings: UserWarning[];
   blocked: number[];     // время срабатываний модерации провайдеров (последние 50)
   blockedTotal: number;
-  dailyLimit?: number;   // $ в сутки; без значения — USER_DAILY_LIMIT
+  dailyLimit?: number;   // устарело ($ в сутки), заменено creditLimit
+  creditLimit?: number;  // кредитов в сутки; без значения — USER_DAILY_CREDITS
   souls?: string[];      // свои Soul ID (Higgsfield)
-  credits?: number;      // баланс кредитов
+  credits?: number;      // старый баланс (до журнала кредитов); переносится в журнал один раз и больше не меняется
+  bal?: number;          // последний известный баланс из журнала — только для отображения в списке
   payClaim?: { pkg: string; credits: number; price: number; at: number }; // «оплатил, жду начисления»
   note?: string;         // заметка владельца
 };
@@ -48,8 +50,8 @@ export const normEmail = (e: string) => e.trim().toLowerCase();
 export const validUid = (id: unknown): id is string => typeof id === "string" && /^u[a-f0-9]{10}$/.test(id);
 export const newUid = () => `u${randomUUID().replace(/-/g, "").slice(0, 10)}`;
 export const defaultDailyLimit = () => {
-  const n = Number(process.env.USER_DAILY_LIMIT);
-  return Number.isFinite(n) && n > 0 ? n : 50;
+  const n = Number(process.env.USER_DAILY_CREDITS);
+  return Number.isFinite(n) && n > 0 ? n : 2000;
 };
 
 export async function hashPassword(pw: string): Promise<string> {
@@ -153,5 +155,5 @@ export function effectiveStatus(u: UserRecord): UserStatus {
 
 export function publicUser(u: UserRecord): PublicUser {
   const { passHash: _p, ...rest } = u;
-  return { ...rest, status: effectiveStatus(u) };
+  return { ...rest, credits: u.bal ?? u.credits ?? 0, status: effectiveStatus(u) };
 }

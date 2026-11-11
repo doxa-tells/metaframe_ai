@@ -82,19 +82,29 @@ export default {
 
     if (req.method === "PUT") {
       let allowed = authed;
+      let max = 0;
       if (!allowed) {
-        // Подписанная ссылка для загрузки из браузера: только в uploads/ и только до истечения срока
+        // Подписанная ссылка для загрузки из браузера: только в uploads/ и только до истечения срока.
+        // Если в ссылке есть max — подпись sig2 охватывает и предельный размер файла
         const exp = Number(url.searchParams.get("exp") || 0);
         const sig = url.searchParams.get("sig") || "";
+        const maxParam = url.searchParams.get("max");
         if (key.startsWith("uploads/") && exp > Date.now() / 1000) {
-          allowed = safeEqual(sig, await hmacHex(env.STORAGE_SECRET, `${key}:${exp}`));
+          if (maxParam) {
+            max = Number(maxParam) || 0;
+            allowed = max > 0 && safeEqual(url.searchParams.get("sig2") || "", await hmacHex(env.STORAGE_SECRET, `${key}:${exp}:${max}`));
+          } else {
+            allowed = safeEqual(sig, await hmacHex(env.STORAGE_SECRET, `${key}:${exp}`));
+          }
         }
       }
       if (!allowed) return json({ error: "unauthorized" }, 401);
       const contentType = req.headers.get("Content-Type") || "application/octet-stream";
       // R2 принимает поток только известной длины; при chunked-передаче буферизуем
       const len = Number(req.headers.get("Content-Length") || 0);
+      if (max && len > max) return json({ error: "file too large", max }, 413);
       const body = len > 0 ? req.body : await req.arrayBuffer();
+      if (max && !(len > 0) && body.byteLength > max) return json({ error: "file too large", max }, 413);
       await env.BUCKET.put(key, body, { httpMetadata: { contentType } });
       return json({ ok: true, key });
     }
