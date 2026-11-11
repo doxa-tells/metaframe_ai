@@ -34,6 +34,8 @@ export type UserRecord = {
   blockedTotal: number;
   dailyLimit?: number;   // $ в сутки; без значения — USER_DAILY_LIMIT
   souls?: string[];      // свои Soul ID (Higgsfield)
+  credits?: number;      // баланс кредитов
+  payClaim?: { pkg: string; credits: number; price: number; at: number }; // «оплатил, жду начисления»
   note?: string;         // заметка владельца
 };
 
@@ -47,7 +49,7 @@ export const validUid = (id: unknown): id is string => typeof id === "string" &&
 export const newUid = () => `u${randomUUID().replace(/-/g, "").slice(0, 10)}`;
 export const defaultDailyLimit = () => {
   const n = Number(process.env.USER_DAILY_LIMIT);
-  return Number.isFinite(n) && n > 0 ? n : 5;
+  return Number.isFinite(n) && n > 0 ? n : 50;
 };
 
 export async function hashPassword(pw: string): Promise<string> {

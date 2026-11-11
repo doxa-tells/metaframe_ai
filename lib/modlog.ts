@@ -6,7 +6,8 @@ import { listItems, putPrivateJSON as putJSON, readPrivateJSON as readJSON } fro
 // Пишется дважды: в общий журнал и в журнал пользователя (чтобы быстро открыть историю одного человека).
 export type ModAction =
   | "register" | "verify" | "reject" | "warn" | "freeze" | "unfreeze" | "ban" | "unban"
-  | "takedown" | "auto_flag" | "auto_freeze" | "limit" | "note" | "login_blocked" | "password";
+  | "takedown" | "auto_flag" | "auto_freeze" | "limit" | "note" | "login_blocked" | "password"
+  | "credit" | "payment_claim";
 
 export type ModEntry = {
   id: string;

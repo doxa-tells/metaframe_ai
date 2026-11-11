@@ -40,7 +40,7 @@ export function humanizeError(status: string, raw?: string | null): HumanError {
 // Одной строкой — для подсказок под полем ввода
 export function humanizeMessage(raw: string): string {
   // Сообщения про аккаунт и лимиты студии уже человеческие
-  if (/Аккаунт|Суточный лимит|Нужен вход|Soul ID вам недоступен|Только для владельца|Заявка на доступ/.test(raw)) return raw;
+  if (/Аккаунт|Суточный лимит|Нужен вход|Soul ID вам недоступен|Только для владельца|Заявка на доступ|Недостаточно кредитов/.test(raw)) return raw;
   const h = humanizeError("failed", raw);
   return h.kind === "other" || h.kind === "params" ? raw : `${h.title}: ${h.text}${h.hint ? `. ${h.hint}` : ""}`;
 }

@@ -6,6 +6,8 @@ import { bulkDelete, cachedJobs, cancelJob, deleteJob, generate, isTerminal, lis
 import { useApp } from "./AppContext";
 import { Gallery, type BulkItem } from "./Gallery";
 import { notifySpent } from "./BalanceBar";
+import { useMe } from "./MeContext";
+import { creditsFor, creditsWord, formatCredits } from "@/lib/credits";
 import { humanizeMessage } from "@/lib/errors";
 import { Composer } from "./Composer";
 import { VideoPanel } from "./VideoPanel";
@@ -180,6 +182,10 @@ export function Studio({ kind }: { kind: Kind }) {
   const request = { modelId: model.id, modeId: mode.id, prompt: form.prompt, params, inputs };
   const validation = validateRequest(request);
   const cost = estimateCost(request);
+  // Пользователи видят цену в кредитах, владелец — себестоимость в долларах
+  const me = useMe();
+  const credits = creditsFor(request);
+  const priceText = me.role === "user" ? `${formatCredits(credits)} ${creditsWord(credits)}` : undefined;
   const KEY_ENV = { google: "GEMINI_API_KEY", byteplus: "ARK_API_KEY", higgsfield: "HF_API_KEY" } as const;
   const providerReady = !config || config.mock || config.providers[model.provider];
   const missingKey = providerReady ? null : `Не задан ключ ${KEY_ENV[model.provider]} в настройках Vercel`;
@@ -191,7 +197,7 @@ export function Studio({ kind }: { kind: Kind }) {
     const tempId = `temp-${Date.now()}`;
     const temp: Job = {
       id: tempId, kind, modelId: model.id, modeId: mode.id, prompt: form.prompt, params, inputs,
-      cost, provider: model.provider, status: "in_progress", outputs: [], createdAt: Date.now(),
+      cost, credits, provider: model.provider, status: "in_progress", outputs: [], createdAt: Date.now(),
     };
     setJobs((prev) => [temp, ...prev]);
     try {
@@ -255,7 +261,7 @@ export function Studio({ kind }: { kind: Kind }) {
 
   const models = MODELS.filter((m) => m.kind === kind);
   const shared = {
-    models, model, mode, prompt: form.prompt, params, inputs, cost, validation, error, missingKey,
+    models, model, mode, prompt: form.prompt, params, inputs, cost, priceText, validation, error, missingKey,
     onModel: setModel,
     onMode: (id: string) => setForm((f) => carry(f, f.modelId, id)),
     onPrompt: (v: string) => setForm((f) => ({ ...f, prompt: v })),

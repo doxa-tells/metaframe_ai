@@ -19,6 +19,7 @@ type Props = {
   params: Record<string, unknown>;
   inputs: Record<string, string[]>;
   cost: number;
+  priceText?: string;
   validation: string | null;
   error: string | null;
   missingKey: string | null;
@@ -401,7 +402,7 @@ export function VideoPanel(p: Props) {
               onClick={() => sendToChat({ text: `Улучши промпт для ${p.model.name} (режим «${p.mode.label}»):\n${p.prompt}` })}>
               <Icon name="sparkle" size={14} /> Улучшить
             </button>
-            <span className="price-tag" title="Примерная стоимость генерации">~{formatUsd(p.cost)}</span>
+            <span className="price-tag" title="Примерная стоимость генерации">{p.priceText ?? `~${formatUsd(p.cost)}`}</span>
           </div>
         </div>
 

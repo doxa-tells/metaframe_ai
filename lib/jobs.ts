@@ -30,6 +30,7 @@ export type JobRecord = {
   createdAt: number;
   finishedAt?: number;
   userId?: string; // кто запустил (для пользователей; у владельца пусто)
+  credits?: number; // сколько кредитов списано у пользователя
   ip?: string;
 };
 
@@ -184,7 +185,7 @@ async function runSync(base: JobRecord, work: () => Promise<Partial<JobRecord>>)
   return rec;
 }
 
-export async function createJob(asked: GenRequest, origin: string, who: { uid?: string; ip?: string; souls?: string[] } = {}): Promise<JobRecord> {
+export async function createJob(asked: GenRequest, origin: string, who: { uid?: string; ip?: string; souls?: string[]; credits?: number } = {}): Promise<JobRecord> {
   const err = validateRequest(asked);
   if (err) throw new hf.ProviderError(err, 400);
   // Пользователь может брать только своих персонажей Soul ID
@@ -202,7 +203,7 @@ export async function createJob(asked: GenRequest, origin: string, who: { uid?: 
     prompt: (asked.prompt ?? "").trim(), params: asked.params ?? {}, inputs: asked.inputs ?? {},
     cost: estimateCost(asked), provider: MOCK ? "mock" : model.provider,
     status: "queued", outputs: [], createdAt: Date.now(),
-    ...(who.uid ? { userId: who.uid } : {}), ...(who.ip ? { ip: who.ip } : {}),
+    ...(who.uid ? { userId: who.uid } : {}), ...(who.ip ? { ip: who.ip } : {}), ...(who.credits ? { credits: who.credits } : {}),
   };
 
   if (MOCK) {
@@ -335,9 +336,16 @@ async function finalize(id: string, patch: Partial<JobRecord>): Promise<JobRecor
 }
 
 // Срабатывания модерации провайдеров у пользователей учитываем (lib/moderation)
+// Неудачная, отменённая или заблокированная генерация — кредиты возвращаются пользователю
 async function afterDone(rec: JobRecord) {
-  if (!rec.userId || rec.status === "completed" || rec.status === "canceled") return;
-  try { await (await import("./moderation")).noteBlocked(rec); }
+  if (!rec.userId || rec.status === "completed") return;
+  const mod = await import("./moderation");
+  if (rec.credits) {
+    try { await mod.refundCredits(rec.userId, rec.credits); }
+    catch (e) { console.error("refundCredits:", (e as Error).message); }
+  }
+  if (rec.status === "canceled") return;
+  try { await mod.noteBlocked(rec); }
   catch (e) { console.error("noteBlocked:", (e as Error).message); }
 }
 

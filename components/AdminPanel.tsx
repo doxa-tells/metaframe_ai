@@ -5,6 +5,8 @@ import { thumbOf, type Job } from "@/lib/client";
 import { getModel } from "@/lib/models";
 import { humanizeError } from "@/lib/errors";
 import { Icon } from "./Icon";
+import { formatCredits } from "@/lib/credits";
+import { formatTenge, getPackage, PACKAGES } from "@/lib/packages";
 
 type Status = "pending" | "active" | "frozen" | "banned" | "rejected";
 type Warn = { id: string; at: number; reason: string; jobId?: string; ack?: number };
@@ -13,6 +15,7 @@ type User = {
   statusReason?: string; frozenUntil?: number; createdAt: number; createdIp?: string; lastLoginAt?: number; lastIp?: string;
   verifiedAt?: number; verifyNote?: string; consent?: { version: string; at: number; ip?: string };
   warnings: Warn[]; blockedTotal: number; blockedDay?: number; dailyLimit?: number; note?: string; souls?: string[];
+  credits?: number; payClaim?: { pkg: string; credits: number; price: number; at: number };
 };
 type Entry = { id: string; at: number; actor: string; action: string; userId?: string; email?: string; jobId?: string; reason?: string; meta?: Record<string, unknown> };
 
@@ -21,9 +24,11 @@ const ACTION: Record<string, string> = {
   register: "Регистрация", verify: "Личность подтверждена", reject: "Заявка отклонена", warn: "Предупреждение", freeze: "Заморозка",
   unfreeze: "Разморозка", ban: "Блокировка", unban: "Разблокировка", takedown: "Снята генерация", auto_flag: "Модерация провайдера",
   auto_freeze: "Автозаморозка", limit: "Лимит", note: "Заметка", login_blocked: "Вход при бане", password: "Пароль",
+  credit: "Кредиты", payment_claim: "Заявка на оплату",
 };
 const FILTERS: { id: string; label: string; match: (u: User) => boolean }[] = [
   { id: "pending", label: "На проверке", match: (u) => u.status === "pending" },
+  { id: "paid", label: "Ждут кредиты", match: (u) => Boolean(u.payClaim) },
   { id: "flagged", label: "С нарушениями", match: (u) => (u.blockedDay ?? 0) > 0 || u.status === "frozen" },
   { id: "active", label: "Активные", match: (u) => u.status === "active" },
   { id: "blocked", label: "Заблокированные", match: (u) => u.status === "banned" || u.status === "rejected" },
@@ -62,13 +67,13 @@ export function AdminPanel() {
   useEffect(() => {
     if (!users || !autoFilter) return;
     setAutoFilter(false);
-    if (!users.some((u) => u.status === "pending")) setFilter("all");
+    if (!users.some((u) => u.status === "pending")) setFilter(users.some((u) => u.payClaim) ? "paid" : "all");
   }, [users, autoFilter]);
 
   const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.id, (users ?? []).filter(f.match).length])), [users]);
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const f = FILTERS.find((x) => x.id === filter) ?? FILTERS[4];
+    const f = FILTERS.find((x) => x.id === filter) ?? FILTERS[FILTERS.length - 1];
     return (users ?? []).filter((u) => (q ? `${u.name} ${u.email} ${u.phone} ${u.id}`.toLowerCase().includes(q) : f.match(u)));
   }, [users, filter, search]);
 
@@ -82,13 +87,13 @@ export function AdminPanel() {
     } catch (e2) { setErr((e2 as Error).message); }
   }
 
-  const onChanged = (u: User) => setUsers((list) => (list ?? []).map((x) => (x.id === u.id ? { ...x, ...u } : x)));
+  const onChanged = (u: User) => setUsers((list) => (list ?? []).map((x) => (x.id === u.id ? { ...u, blockedDay: x.blockedDay } : x)));
 
   return (
     <div className="admin">
       <div className="admin-top">
         <div className="seg">
-          <button className={tab === "users" ? "on" : ""} onClick={() => setTab("users")}>Пользователи{counts.pending ? <span className="badge">{counts.pending}</span> : null}</button>
+          <button className={tab === "users" ? "on" : ""} onClick={() => setTab("users")}>Пользователи{counts.pending + counts.paid ? <span className="badge">{counts.pending + counts.paid}</span> : null}</button>
           <button className={tab === "log" ? "on" : ""} onClick={() => setTab("log")}>Журнал модерации</button>
         </div>
         <form className="admin-lookup" onSubmit={doLookup}>
@@ -117,6 +122,7 @@ export function AdminPanel() {
               <button key={u.id} className={`admin-user ${sel === u.id ? "on" : ""}`} onClick={() => { setSel(u.id); setFocusJob(null); }}>
                 <div className="row between gap8"><b className="ellipsis">{u.name}</b><span className={`st st-${u.status}`}>{STATUS[u.status]}</span></div>
                 <div className="row between gap8 small muted"><span className="ellipsis">{u.email}</span><span>{dt(u.createdAt).slice(0, 8)}</span></div>
+                {u.payClaim && <div className="small paid">Оплатил {formatTenge(u.payClaim.price)} — ждёт {formatCredits(u.payClaim.credits)} кредитов</div>}
                 {(u.blockedDay ?? 0) > 0 && <div className="small flag">Модерация за сутки: {u.blockedDay}</div>}
               </button>
             ))}
@@ -137,6 +143,7 @@ function UserDetail({ uid, focusJob, onChanged, onClose }: { uid: string; focusJ
   const [reason, setReason] = useState("");
   const [days, setDays] = useState("7");
   const [limitIn, setLimitIn] = useState("");
+  const [creditIn, setCreditIn] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [logRev, setLogRev] = useState(0);
@@ -153,7 +160,8 @@ function UserDetail({ uid, focusJob, onChanged, onClose }: { uid: string; focusJ
     try {
       const d = await call<{ user: User; limit: number }>(`/api/admin/users/${uid}`, { method: "POST", body: JSON.stringify({ action, reason, ...extra }) });
       setU(d.user); setLimit(d.limit); onChanged(d.user);
-      if (action !== "limit") setReason("");
+      if (action !== "limit" && action !== "credit") setReason("");
+      if (action === "credit") setCreditIn("");
       setMsg("Сохранено");
       setLogRev((r) => r + 1);
     } catch (e) { setMsg((e as Error).message); }
@@ -182,11 +190,31 @@ function UserDetail({ uid, focusJob, onChanged, onClose }: { uid: string; focusJ
         <div><span>Последний вход</span>{dt(u.lastLoginAt)}{u.lastIp ? ` · ${u.lastIp}` : ""}</div>
         <div><span>Согласие с правилами</span>{u.consent ? `${u.consent.version}, ${dt(u.consent.at)}` : "—"}</div>
         <div><span>Личность подтверждена</span>{u.verifiedAt ? `${dt(u.verifiedAt)}${u.verifyNote ? ` — ${u.verifyNote}` : ""}` : "нет"}</div>
-        <div><span>Расход за 24 ч</span>${(spent ?? 0).toFixed(2)} из ${limit ?? "?"}</div>
+        <div><span>Кредиты</span><b>{formatCredits(u.credits ?? 0)}</b></div>
+        <div><span>Себестоимость за 24 ч</span>${(spent ?? 0).toFixed(2)} из лимита ${limit ?? "?"}</div>
         <div><span>Модерация провайдеров</span>{u.blockedTotal} всего · {u.blockedDay ?? 0} за сутки</div>
         {u.statusReason && <div className="wide"><span>Причина статуса</span>{u.statusReason}{u.frozenUntil ? ` (до ${dt(u.frozenUntil)})` : ""}</div>}
         {u.purpose && <div className="wide"><span>Цель</span>{u.purpose}</div>}
         {u.note && <div className="wide"><span>Заметка</span>{u.note}</div>}
+      </div>
+
+      <div className="ud-credits">
+        {u.payClaim && (
+          <div className="ud-claim small">
+            <b>Заявка на оплату:</b> пакет {getPackage(u.payClaim.pkg)?.name ?? u.payClaim.pkg} — {formatCredits(u.payClaim.credits)} кредитов за {formatTenge(u.payClaim.price)}, {dt(u.payClaim.at)}. Проверьте перевод в Kaspi и чек в WhatsApp.
+          </div>
+        )}
+        <div className="ud-btns">
+          <span className="small muted">Начислить:</span>
+          {PACKAGES.map((p) => (
+            <button key={p.id} className={`btn small ${u.payClaim?.pkg === p.id ? "accent" : ""}`} disabled={busy}
+              onClick={() => act("credit", { amount: p.credits, reason: `Kaspi: пакет ${p.name}, ${formatTenge(p.price)}` }, `Начислить ${p.credits} кредитов (пакет ${p.name}, ${formatTenge(p.price)})?`)}>
+              +{formatCredits(p.credits)} · {p.name}
+            </button>
+          ))}
+          <input type="number" step={1} placeholder="другое (±)" value={creditIn} onChange={(e) => setCreditIn(e.target.value)} />
+          <button className="btn small" disabled={busy || !Number(creditIn)} onClick={() => act("credit", { amount: Number(creditIn), reason: reason.trim() || "Ручная корректировка" }, `${Number(creditIn) > 0 ? "Начислить" : "Списать"} ${Math.abs(Number(creditIn))} кредитов?`)}>Применить</button>
+        </div>
       </div>
 
       <div className="ud-actions">
@@ -299,7 +327,7 @@ function UserJobs({ uid, focusJob, reason, onTakedown }: { uid: string; focusJob
                   </div>
                 )}
                 <div className="row between gap4">
-                  <span className="muted">${Number(j.cost || 0).toFixed(2)}{j.ip ? ` · ${j.ip}` : ""}</span>
+                  <span className="muted">{j.credits ? `${formatCredits(j.credits)} кр. · ` : ""}${Number(j.cost || 0).toFixed(2)}{j.ip ? ` · ${j.ip}` : ""}</span>
                   <button className="btn danger tiny" onClick={() => takedown(j)}>Снять</button>
                 </div>
               </div>

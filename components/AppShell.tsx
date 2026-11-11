@@ -7,6 +7,7 @@ import { ChatPanel } from "./ChatPanel";
 import { BalanceBar } from "./BalanceBar";
 import { MeProvider, useMe, type Me } from "./MeContext";
 import { AccountNotices } from "./AccountNotices";
+import { CreditsChip } from "./CreditsChip";
 import { asset } from "@/lib/brand";
 import { Icon } from "./Icon";
 import { withBase } from "@/lib/base";
@@ -80,6 +81,9 @@ function Shell({ children }: { children: ReactNode }) {
                 <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>{admin && <kbd>4</kbd>} разделы</div>
                 <div><kbd>C</kbd> чат · <kbd>Esc</kbd> закрыть</div>
               </div>
+              <Link className="tb-menu-item" href="/credits" onClick={() => setMenu(false)}>
+                <NavIcon name="svg:sparkle" /> Кредиты и оплата
+              </Link>
               <a className="tb-menu-item" href={withBase("/terms")} target="_blank" rel="noreferrer">
                 <NavIcon name="svg:info" /> Правила студии
               </a>
@@ -98,7 +102,7 @@ function Shell({ children }: { children: ReactNode }) {
           ))}
         </nav>
         <div className="tb-right">
-          {admin && <BalanceBar />}
+          {admin ? <BalanceBar /> : <CreditsChip />}
           <button className={`tb-btn ${chatOpen ? "active" : ""}`} onClick={() => setChatOpen(!chatOpen)} title="Чат (C)">
             <NavIcon name="icon-chat" />
             <span>Чат</span>

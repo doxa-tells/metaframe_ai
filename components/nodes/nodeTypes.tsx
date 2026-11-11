@@ -1,7 +1,19 @@
 "use client";
 import { Handle, Position, useReactFlow, type NodeProps, type Node } from "@xyflow/react";
 import { useContext, createContext } from "react";
-import { getModel, formatUsd, estimateCost, MODELS } from "@/lib/models";
+import { getModel, formatUsd, estimateCost, MODELS, type GenRequest } from "@/lib/models";
+import { creditsFor, creditsWord, formatCredits } from "@/lib/credits";
+import { useMe } from "../MeContext";
+
+// Владелец видит себестоимость, пользователь — кредиты
+function usePrice() {
+  const me = useMe();
+  return (req: GenRequest) => {
+    if (me.role !== "user") return `≈${formatUsd(estimateCost(req))}`;
+    const c = creditsFor(req);
+    return `${formatCredits(c)} ${creditsWord(c)}`;
+  };
+}
 import { MediaInput } from "../MediaInput";
 import { Icon } from "../Icon";
 import { buildNodeRequest } from "./engine";
@@ -127,7 +139,8 @@ export function ImageGenNode({ id, data, selected }: NodeProps<FlowNode>) {
   const ar = mode.params.find((x) => x.key === "aspect_ratio");
   const q = mode.params.find((x) => QUALITY_KEYS.includes(x.key));
   const refs = getEdges().filter((e) => e.target === id && e.targetHandle === "in-image").length;
-  const est = estimateCost(buildNodeRequest({ id, type: "imageGen", data, position: { x: 0, y: 0 } }, "", refs ? ["x"] : []));
+  const price = usePrice();
+  const est = price(buildNodeRequest({ id, type: "imageGen", data, position: { x: 0, y: 0 } }, "", refs ? ["x"] : []));
   return (
     <Shell title="Генерация фото" icon="image" accent={PORT_COLORS.image} id={id} runnable selected={selected}>
       <Port type="target" kind="text" id="in-text" top={52} label="промпт" />
@@ -148,7 +161,7 @@ export function ImageGenNode({ id, data, selected }: NodeProps<FlowNode>) {
       </div>
       <StatusLine d={data} />
       {data.output && <img className="node-media" src={data.output} alt="" />}
-      <div className="node-foot muted">≈{formatUsd(est)} · {model.vendor}</div>
+      <div className="node-foot muted">{est} · {model.vendor}</div>
       <Port type="source" kind="image" id="out-image" top={52} label="фото" />
     </Shell>
   );
@@ -161,7 +174,8 @@ export function VideoGenNode({ id, data, selected }: NodeProps<FlowNode>) {
   const set = (k: string, v: unknown) => updateNodeData(id, { params: { ...p, [k]: v } });
   const isKling = modelId === "kling-4.0";
   const frames = getEdges().filter((e) => e.target === id && e.targetHandle === "in-image").length;
-  const est = estimateCost(buildNodeRequest({ id, type: "videoGen", data, position: { x: 0, y: 0 } }, "x", Array(frames).fill("x")));
+  const price = usePrice();
+  const est = price(buildNodeRequest({ id, type: "videoGen", data, position: { x: 0, y: 0 } }, "x", Array(frames).fill("x")));
   return (
     <Shell title="Генерация видео" icon="video" accent={PORT_COLORS.video} id={id} runnable selected={selected}>
       <Port type="target" kind="text" id="in-text" top={52} label="промпт" />
@@ -185,7 +199,7 @@ export function VideoGenNode({ id, data, selected }: NodeProps<FlowNode>) {
       <div className="muted tiny-text">{frames === 0 ? "Текст → видео" : frames === 1 ? "Первый кадр → видео" : `${frames} кадра: первый, ${frames > 2 && isKling ? "промежуточные, " : ""}последний`}</div>
       <StatusLine d={data} />
       {data.output && <video className="node-media" src={data.output} controls loop playsInline />}
-      <div className="node-foot muted">≈{formatUsd(est)} · {getModel(modelId)?.vendor}</div>
+      <div className="node-foot muted">{est} · {getModel(modelId)?.vendor}</div>
       <Port type="source" kind="video" id="out-video" top={52} label="видео" />
     </Shell>
   );

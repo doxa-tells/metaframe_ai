@@ -69,13 +69,34 @@ export async function assertWithinLimit(u: UserRecord, cost: number): Promise<vo
   }
 }
 
-export type AdminAction = "verify" | "reject" | "warn" | "freeze" | "unfreeze" | "ban" | "unban" | "limit" | "note";
+// ---------- Кредиты ----------
+const r2 = (n: number) => Math.round(n * 100) / 100;
 
-export async function applyAction(uid: string, action: AdminAction, opts: { reason?: string; days?: number; limit?: number | null; jobId?: string }): Promise<UserRecord> {
+export async function chargeCredits(uid: string, n: number): Promise<void> {
+  if (!(n > 0)) return;
+  await updateUser(uid, (u) => {
+    const bal = u.credits ?? 0;
+    if (bal + 1e-9 < n) {
+      throw Object.assign(new Error(`Недостаточно кредитов: нужно ${r2(n)}, на балансе ${r2(bal)}. Пополните баланс в разделе «Кредиты»`), { status: 402 });
+    }
+    u.credits = r2(bal - n);
+  });
+}
+
+export async function refundCredits(uid: string, n: number): Promise<void> {
+  if (!(n > 0)) return;
+  await updateUser(uid, (u) => { u.credits = r2((u.credits ?? 0) + n); });
+}
+
+export type AdminAction = "verify" | "reject" | "warn" | "freeze" | "unfreeze" | "ban" | "unban" | "limit" | "note" | "credit";
+
+export async function applyAction(uid: string, action: AdminAction, opts: { reason?: string; days?: number; limit?: number | null; jobId?: string; amount?: number }): Promise<UserRecord> {
   const reason = (opts.reason ?? "").trim().slice(0, 1000);
   const needReason: AdminAction[] = ["reject", "warn", "freeze", "ban"];
   if (needReason.includes(action) && !reason) throw Object.assign(new Error("Укажите причину"), { status: 400 });
   const now = Date.now();
+  if (action === "credit" && !(Number.isFinite(opts.amount) && opts.amount !== 0)) throw Object.assign(new Error("Укажите количество кредитов"), { status: 400 });
+  let before = 0;
   const u = await updateUser(uid, (u) => {
     switch (action) {
       case "verify":
@@ -96,11 +117,17 @@ export async function applyAction(uid: string, action: AdminAction, opts: { reas
         u.dailyLimit = opts.limit === null || opts.limit === undefined ? undefined : Math.max(0, Math.min(10000, opts.limit)); break;
       case "note":
         u.note = reason || undefined; break;
+      case "credit":
+        before = u.credits ?? 0;
+        u.credits = r2(Math.max(0, before + (opts.amount ?? 0)));
+        if ((opts.amount ?? 0) > 0) u.payClaim = undefined; // оплата учтена
+        break;
     }
   });
   await logAction({
     actor: "admin", action: action as ModAction, userId: uid, email: u.email, jobId: opts.jobId, reason: reason || undefined,
-    meta: action === "freeze" ? { days: opts.days ?? null } : action === "limit" ? { limit: u.dailyLimit ?? null } : undefined,
+    meta: action === "freeze" ? { days: opts.days ?? null } : action === "limit" ? { limit: u.dailyLimit ?? null }
+      : action === "credit" ? { amount: opts.amount, before, after: u.credits } : undefined,
   });
   return u;
 }

@@ -10,7 +10,7 @@ export type Job = {
   id: string; kind: Kind; modelId: string; modeId: string; prompt: string;
   params: Record<string, unknown>; inputs: Record<string, string[]>; cost: number;
   provider: string; providerRequestId?: string; status: JobStatus; outputs: JobOutput[];
-  error?: string; createdAt: number; finishedAt?: number; userId?: string; ip?: string;
+  error?: string; createdAt: number; finishedAt?: number; userId?: string; ip?: string; credits?: number;
 };
 export const TERMINAL: JobStatus[] = ["completed", "failed", "nsfw", "canceled"];
 export const isTerminal = (s: JobStatus) => TERMINAL.includes(s);

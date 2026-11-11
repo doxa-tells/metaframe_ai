@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { getModel, formatUsd } from "@/lib/models";
+import { creditsWord, formatCredits } from "@/lib/credits";
+import { useMe } from "./MeContext";
 import { ensureThumbsApi, isTerminal, STATUS_LABEL, thumbOf, timeAgo, type Job, type JobOutput } from "@/lib/client";
 import { downloadItems, downloadOriginal, fileNameFor } from "@/lib/archive";
 import { humanizeError } from "@/lib/errors";
@@ -110,6 +112,9 @@ function useView(key: string, def: GalleryView): [GalleryView, (patch: Partial<G
 }
 
 export function Gallery(p: Props) {
+  // Пользователь видит списанные кредиты, владелец — себестоимость
+  const me = useMe();
+  const priceOf = (job: Job) => (me.role === "user" ? `${formatCredits(job.credits ?? 0)} ${creditsWord(job.credits ?? 0)}` : formatUsd(job.cost));
   const { sendToChat } = useApp();
   const [view, setView] = useView(p.viewKey, p.defaultView);
   const fav = useFavorites();
@@ -423,7 +428,7 @@ export function Gallery(p: Props) {
               )}
             </>
           )}
-          {!masonry && <div className="tile-cap">{model?.name} · {formatUsd(job.cost)}</div>}
+          {!masonry && <div className="tile-cap">{model?.name} · {priceOf(job)}</div>}
         </div>
       </div>
     );
@@ -597,7 +602,7 @@ export function Gallery(p: Props) {
                   <b>{model?.name}</b>
                   <button className="iconbtn" onClick={() => setOpen(null)}><Icon name="x" size={16} /></button>
                 </div>
-                <div className="muted small">{mode?.label} · {timeAgo(open.job.createdAt)} · {formatUsd(open.job.cost)}</div>
+                <div className="muted small">{mode?.label} · {timeAgo(open.job.createdAt)} · {priceOf(open.job)}</div>
                 {open.job.prompt && <div className="lb-prompt">{open.job.prompt}</div>}
                 {refs.length > 0 && (
                   <div className="lb-refs">
