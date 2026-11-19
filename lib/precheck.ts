@@ -30,8 +30,11 @@ async function readRec(url: string, scope: string): Promise<{ path: string; rec:
 const dropRec = async (item?: StoredItem) => { if (item) await deleteItems([item]).catch(() => {}); };
 
 const FAIL_TEXT = "BytePlus не пропустил реф: похоже на реального человека, чужого персонажа или запрещённый контент";
-const isThrottle = (e: unknown) => e instanceof ArkAssetError && (e.status === 429 || /Limit(Exceeded)?|Throttl|TooMany|FlowLimit/i.test(e.code ?? "")) && !/Quota/i.test(e.code ?? "");
-const isQuota = (e: unknown) => e instanceof ArkAssetError && /Quota|Exceed.*(Asset|Capacity)|Capacity/i.test(`${e.code} ${e.message}`);
+// Лимит частоты (QuotaWriteQPMExceeded и т. п.) — это «подождите», а не «место кончилось»:
+// раньше он принимался за нехватку места, и студия удаляла 10 старых ассетов — в том числе только что проверенные рефы
+const RATE = /QPM|QPS|RPM|rate limit|Throttl|TooMany|FlowLimit|RequestLimit/i;
+const isThrottle = (e: unknown) => e instanceof ArkAssetError && (e.status === 429 || RATE.test(`${e.code} ${e.message}`));
+const isQuota = (e: unknown) => e instanceof ArkAssetError && !RATE.test(`${e.code} ${e.message}`) && /Quota|Exceed.*(Asset|Capacity)|Capacity/i.test(`${e.code} ${e.message}`);
 
 const NO_SUB = "Проверка рефов через библиотеку BytePlus доступна только на платной подписке Advanced/Premium в ModelArk. Для рефов с лицами переключитесь на «Seedance 2.5 · Higgsfield»";
 const isNoSubscription = (e: unknown) => e instanceof ArkAssetError && /SubscriptionRequired/i.test(`${e.code} ${e.message}`);
@@ -61,6 +64,11 @@ async function fingerprint(url: string, kind: string): Promise<string | null> {
 // Вердикт «не прошёл» общий для всех (тот же файл не пропустят никому), «прошёл» — только внутри своей библиотеки
 const fpPath = (fp: string, scope: string) => `precheck/seedance/fp/${scope || "owner"}/${fp}.json`;
 const fpFailPath = (fp: string) => `precheck/seedance/fp-failed/${fp}.json`;
+async function dropAt(p: string) {
+  const { items } = await listItems(p, 1);
+  const it = items.find((i) => i.pathname === p);
+  if (it) await deleteItems([it]).catch(() => {});
+}
 async function readAt(p: string): Promise<PrecheckResult | null> {
   const { items } = await listItems(p, 1);
   const it = items.find((i) => i.pathname === p);
@@ -119,9 +127,11 @@ export async function precheckSeedance(modelId: string, url: string, kind: "imag
   const fp = await fingerprint(url, kind);
   if (fp) {
     const known = (await readAt(fpFailPath(fp))) ?? (await readAt(fpPath(fp, scope)));
-    if (known && (known.status === "Active" || known.status === "Failed")) {
-      await putJSON(path, { ...known, fp });
-      return known;
+    if (known?.status === "Failed") { await putJSON(path, { ...known, fp }); return known; }
+    if (known?.status === "Active" && known.assetId) {
+      const st = await assetStatus(known.assetId).catch(() => null);
+      if (st?.status === "Active") { await putJSON(path, { ...known, fp }); return known; }
+      if (st?.status === "Missing") await dropAt(fpPath(fp, scope));
     }
   }
 
@@ -155,15 +165,24 @@ export async function arkInputFor(url: string, scope = ""): Promise<string | nul
   const { path, rec, item } = await readRec(url, scope);
   if (!rec?.assetId) return null;
   if (rec.status === "Failed") throw new ProviderError(rec.reason ?? FAIL_TEXT, 400);
-  if (rec.status === "Active") return `asset://${rec.assetId}`;
-  const st = await assetStatus(rec.assetId);
-  if (st.status === "Active") { await putJSON(path, { ...rec, status: "Active", at: Date.now() }); return `asset://${rec.assetId}`; }
+  // Даже «прошедший» ассет перед генерацией проверяем: его могли удалить (лимит 50 ассетов) —
+  // тогда отдаём обычную ссылку, а Seedance проверит реф сам
+  const st = await assetStatus(rec.assetId).catch((e) => { if (isThrottle(e)) return null; throw e; });
+  if (!st) return null; // BytePlus просит подождать — генерируем по обычной ссылке
+  if (st.status === "Active") {
+    if (rec.status !== "Active") await putJSON(path, { ...rec, status: "Active", at: Date.now() });
+    return `asset://${rec.assetId}`;
+  }
   if (st.status === "Failed") {
     const reason = st.reason ? `${FAIL_TEXT} (${st.reason})` : FAIL_TEXT;
     await putJSON(path, { ...rec, ok: false, status: "Failed", reason, at: Date.now() });
     throw new ProviderError(reason, 400);
   }
-  if (st.status === "Missing") { await dropRec(item); return null; }
+  if (st.status === "Missing") {
+    await dropRec(item);
+    if (rec.fp) await dropAt(fpPath(rec.fp, scope));
+    return null;
+  }
   throw new ProviderError("Референс ещё проверяется BytePlus — подождите несколько секунд и повторите", 409);
 }
 

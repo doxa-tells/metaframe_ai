@@ -282,7 +282,16 @@ export async function createJob(asked: GenRequest, origin: string, who: { id?: s
         (model.kind === "video" ? await arkInputFor(u, who.uid ?? "") : null) ?? toProviderUrl(u, origin)));
     }
     if (model.kind === "video") {
-      const taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: conv }, arkModel));
+      let taskId: string;
+      try {
+        taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: conv }, arkModel));
+      } catch (e) {
+        // Ассет успел исчезнуть из библиотеки BytePlus — повторяем с обычными ссылками (Seedance проверит рефы сам)
+        if (!/asset[^.]*not found/i.test((e as Error).message)) throw e;
+        const plain: Record<string, string[]> = {};
+        for (const [k, v] of Object.entries(req.inputs ?? {})) plain[k] = await Promise.all((v ?? []).filter(Boolean).map((u) => toProviderUrl(u, origin)));
+        taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: plain }, arkModel));
+      }
       const rec: JobRecord = { ...base, providerRequestId: `ark:${taskId}` };
       await putJSON(pendingPath(id), rec);
     await markPending(id, rec.providerRequestId!);

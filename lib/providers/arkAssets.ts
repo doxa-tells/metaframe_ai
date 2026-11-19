@@ -141,7 +141,12 @@ export async function assetStatus(id: string): Promise<AssetState> {
 // Лимит общий на аккаунт, поэтому чистим самые старые из всех наших групп
 export async function pruneOldest(count: number): Promise<number> {
   const r = await call("ListAssets", { Filter: { GroupType: "AIGC" }, MaxResults: 100, SortBy: "CreateTime", SortOrder: "Asc", ProjectName: ARK_PROJECT() });
-  const items = ((r.Items ?? []) as { Id?: string }[]).filter((x) => x.Id).slice(0, count);
+  // Свежие ассеты (моложе 6 часов) не трогаем — ими могут пользоваться рефы, которые сейчас в работе
+  const fresh = (x: { CreateTime?: unknown }) => {
+    const t = typeof x.CreateTime === "number" ? (x.CreateTime < 1e12 ? x.CreateTime * 1000 : x.CreateTime) : Date.parse(String(x.CreateTime ?? ""));
+    return Number.isFinite(t) && Date.now() - t < 6 * 3_600_000;
+  };
+  const items = ((r.Items ?? []) as { Id?: string; CreateTime?: unknown }[]).filter((x) => x.Id && !fresh(x)).slice(0, count);
   let n = 0;
   for (const it of items) { try { await call("DeleteAsset", { Id: it.Id, ProjectName: ARK_PROJECT() }); n++; } catch { /* дальше */ } }
   return n;
