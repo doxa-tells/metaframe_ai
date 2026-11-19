@@ -465,7 +465,16 @@ export async function pollJob(id: string, providerRequestId: string): Promise<Pa
     return done ?? { id, status: st3, error: os.error };
   }
   if (providerRequestId.startsWith("ark:")) {
-    const as = await ark.seedanceStatus(providerRequestId.slice(4));
+    let as: Awaited<ReturnType<typeof ark.seedanceStatus>>;
+    try {
+      as = await ark.seedanceStatus(providerRequestId.slice(4));
+    } catch (e) {
+      // BytePlus не знает такую задачу — без этого карточка висела бы «В очереди» бесконечно
+      if ((e as hf.ProviderError).status !== 404) throw e;
+      const msg = "Задача не найдена у BytePlus (провайдер её не сохранил) — запустите генерацию заново";
+      const done = await finalize(id, { status: "failed", error: msg });
+      return done ?? { id, status: "failed", error: msg };
+    }
     if (!TERMINAL.includes(as.status)) return { id, status: as.status };
     const outs: JobOutput[] = as.videoUrl ? [{ url: as.videoUrl, type: "video" }] : [];
     const st2: JobStatus = as.status === "completed" && !outs.length ? "failed" : as.status;
@@ -493,7 +502,11 @@ export async function pollJob(id: string, providerRequestId: string): Promise<Pa
 
 export async function cancelJob(providerRequestId: string): Promise<void> {
   if (providerRequestId.startsWith("mock:") || providerRequestId.startsWith("sync:")) return;
-  if (providerRequestId.startsWith("ark:")) { await ark.seedanceCancel(providerRequestId.slice(4)); return; }
+  if (providerRequestId.startsWith("ark:")) {
+    // Задачи уже нет у BytePlus — считаем отменённой, а не ошибкой
+    try { await ark.seedanceCancel(providerRequestId.slice(4)); } catch (e) { if ((e as hf.ProviderError).status !== 404) throw e; }
+    return;
+  }
   if (providerRequestId.startsWith("omni:")) { await omniCancel(providerRequestId.slice(5)); return; }
   await hf.cancel(providerRequestId);
 }
