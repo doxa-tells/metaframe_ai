@@ -10,12 +10,10 @@ export function humanizeError(status: string, raw?: string | null): HumanError {
   if (status === "canceled") return { ...base, kind: "canceled", title: "Отменено", text: "Генерация остановлена" };
   if (status === "nsfw") return { ...base, kind: "censor", title: "Цензура", text: "Провайдер скрыл результат модерацией", hint: IP_HINT };
 
-  if (has(/Видео-референс длится|не меньше длины видео-референса/))
+  if (has(/Seedance правит видео целиком/))
     return { ...base, kind: "params", title: "Длительность", text: e.slice(0, 220) };
-  if (has(/interpreted as video editing/i))
-    return { ...base, kind: "params", title: "Длительность", text: "Seedance правит исходное видео: поставьте длительность не меньше длины видео-референса (с округлением вверх) и формат «Авто»" };
-  if (has(/['`"]duration['`"].*not valid/i))
-    return { ...base, kind: "params", title: "Длительность", text: "Провайдер не принял длительность. Если среди рефов есть видео, поставьте длительность не меньше его длины (с округлением вверх) и формат «Авто»" };
+  if (has(/Seedance понял промпт как правку видео|interpreted as video editing|TaskTypeConstraint/i))
+    return { ...base, kind: "params", title: "Правка видео", text: "Seedance понял промпт как правку видео: длину и формат он берёт из исходника. Запустите на «Seedance 2.5» (BytePlus) — студия подставит их сама" };
   if (has(/PrivacyInformation|may contain real person|реального человека/i))
     return { ...base, kind: "censor", title: "Реальное лицо", text: "Seedance не принимает референсы с реальными лицами — даже фотореалистичные сгенерированные", hint: "Попробуйте «Seedance 2.5 · Higgsfield», Kling или Gemini Omni" };
   if (has(/RECITATION|copyright|авторск/i))
@@ -46,7 +44,7 @@ export function humanizeError(status: string, raw?: string | null): HumanError {
 // Одной строкой — для подсказок под полем ввода
 export function humanizeMessage(raw: string): string {
   // Сообщения про аккаунт и лимиты студии уже человеческие
-  if (/Аккаунт|Суточный лимит|Нужен вход|Soul ID вам недоступен|Только для владельца|Заявка на доступ|Недостаточно кредитов|Видео-референс длится|длины видео-референса/.test(raw)) return raw;
+  if (/Аккаунт|Суточный лимит|Нужен вход|Soul ID вам недоступен|Только для владельца|Заявка на доступ|Недостаточно кредитов|Seedance правит видео целиком|Seedance понял промпт как правку видео/.test(raw)) return raw;
   const h = humanizeError("failed", raw);
   return h.kind === "other" || h.kind === "params" ? raw : `${h.title}: ${h.text}${h.hint ? `. ${h.hint}` : ""}`;
 }

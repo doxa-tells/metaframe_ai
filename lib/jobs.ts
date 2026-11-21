@@ -283,16 +283,36 @@ export async function createJob(asked: GenRequest, origin: string, who: { id?: s
     }
     if (model.kind === "video") {
       let taskId: string;
+      let cost = base.cost;
+      const send = async (inputs: Record<string, string[]>) => {
+        const body = buildArkVideoBody({ ...req, inputs }, arkModel);
+        try {
+          return await ark.seedanceSubmit(body);
+        } catch (e) {
+          if (!SD_EDIT_ERR.test((e as Error).message)) throw e;
+          // Правка видео: результат будет длиной с исходник. Пользователю не даём запустить дороже, чем он оплатил
+          const asked = Number(req.params?.duration ?? 5);
+          const len = await longestVideoRef(req, origin);
+          const need = len ? Math.ceil(len) : null;
+          if (who.uid && (!need || need > asked)) {
+            throw new hf.ProviderError(need
+              ? `Seedance правит видео целиком, результат будет длиной с исходник — ${String(len).replace(".", ",")} с. Поставьте длительность ${need} с и запустите снова`
+              : "Seedance правит видео целиком, результат будет длиной с исходник. Поставьте длительность, равную длине видео-референса (с округлением вверх)", 400);
+          }
+          if (need) cost = Math.round((base.cost / Math.max(1, asked)) * need * 10000) / 10000;
+          return await ark.seedanceSubmit({ ...body, duration: -1, ratio: "adaptive" });
+        }
+      };
       try {
-        taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: conv }, arkModel));
+        taskId = await send(conv);
       } catch (e) {
         // Ассет успел исчезнуть из библиотеки BytePlus — повторяем с обычными ссылками (Seedance проверит рефы сам)
-        if (!/asset[^.]*not found/i.test((e as Error).message)) throw await explainSeedanceParams(e, req, origin);
+        if (!/asset[^.]*not found/i.test((e as Error).message)) throw e;
         const plain: Record<string, string[]> = {};
         for (const [k, v] of Object.entries(req.inputs ?? {})) plain[k] = await Promise.all((v ?? []).filter(Boolean).map((u) => toProviderUrl(u, origin)));
-        taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: plain }, arkModel));
+        taskId = await send(plain);
       }
-      const rec: JobRecord = { ...base, providerRequestId: `ark:${taskId}` };
+      const rec: JobRecord = { ...base, cost, providerRequestId: `ark:${taskId}` };
       await putJSON(pendingPath(id), rec);
     await markPending(id, rec.providerRequestId!);
       return rec;
@@ -316,32 +336,24 @@ export async function createJob(asked: GenRequest, origin: string, who: { id?: s
   const absInputs: Record<string, string[]> = {};
   for (const [k, v] of Object.entries(req.inputs ?? {})) absInputs[k] = (v ?? []).filter(Boolean).map((u) => toAbsolute(u, origin));
   const { endpoint, body } = buildHiggsfieldBody({ ...req, inputs: absInputs });
-  const sub = await hf.submit(endpoint, body, id).catch(async (e) => { throw await explainSeedanceParams(e, req, origin); });
+  const sub = await hf.submit(endpoint, body, id).catch((e) => { throw SD_EDIT_ERR.test((e as Error).message) ? new hf.ProviderError(HF_EDIT_TEXT, 400) : e; });
   const rec: JobRecord = { ...base, providerRequestId: sub.request_id, status: (sub.status as JobStatus) || "queued" };
   await putJSON(pendingPath(id), rec);
     await markPending(id, rec.providerRequestId!);
   return rec;
 }
 
-// Seedance с видео-референсом отклоняет длительность короче исходника и чужой формат,
-// но пишет об этом невнятно. Меряем видео сами и говорим, что именно поставить
-const SD_PARAM_ERR = /['`"]?(duration|ratio)['`"]?.*not valid|interpreted as video editing/i;
-async function explainSeedanceParams(e: unknown, req: GenRequest, origin: string): Promise<unknown> {
-  const msg = (e as Error)?.message ?? "";
+// Seedance сам решает по промпту, что это правка видео, и тогда требует duration = -1 и ratio = adaptive:
+// длина и формат результата берутся из исходного видео
+const SD_EDIT_ERR = /TaskTypeConstraint|interpreted as video editing/i;
+async function longestVideoRef(req: GenRequest, origin: string): Promise<number | null> {
   const vids = (req.inputs?.video_urls ?? []).filter(Boolean);
-  if (!vids.length || !SD_PARAM_ERR.test(msg)) return e;
+  if (!vids.length) return null;
   const { videoSeconds } = await import("./mediaprobe");
   const secs = (await Promise.all(vids.map((u) => videoSeconds(u, origin).catch(() => null)))).filter((x): x is number => !!x);
-  const longest = secs.length ? Math.max(...secs) : null;
-  const asked = Number(req.params?.duration ?? 0);
-  const need = longest ? Math.ceil(longest) : null;
-  const len = longest ? `Видео-референс длится ${String(longest).replace(".", ",")} с. ` : "";
-  const dur = need
-    ? (asked < need ? `Поставьте длительность ${need} с или больше (сейчас ${asked} с)` : `Поставьте длительность ровно ${need} с`)
-    : "Поставьте длительность не меньше длины видео-референса, с округлением вверх";
-  const text = `${len}${dur} и формат «Авто»: при правке видео Seedance берёт длину и формат из исходника`;
-  return new hf.ProviderError(text, 400);
+  return secs.length ? Math.max(...secs) : null;
 }
+const HF_EDIT_TEXT = "Seedance понял промпт как правку видео: длину и формат он берёт из исходного видео. Через Higgsfield так нельзя — запустите на «Seedance 2.5» (BytePlus), там студия подставит их сама";
 
 async function findJobFiles(id: string): Promise<{ pending?: StoredItem; done?: StoredItem }> {
   const { items } = await listItems(jobPrefix(id), 10);
