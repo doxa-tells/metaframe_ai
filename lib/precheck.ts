@@ -18,7 +18,7 @@ export type PrecheckResult = {
 };
 
 // У каждого пользователя своя библиотека ассетов (как требует BytePlus) и свой кэш проверок
-const pathOf = (url: string, scope: string) => `precheck/seedance/${createHash("sha1").update(scope ? `${scope}|${url}` : url).digest("hex")}.json`;
+const pathOf = (url: string, scope: string) => `precheck/seedance-v2/${createHash("sha1").update(scope ? `${scope}|${url}` : url).digest("hex")}.json`;
 const groupOf = (scope: string) => (scope ? `MetaFrame ${scope}` : undefined);
 
 async function readRec(url: string, scope: string): Promise<{ path: string; rec: PrecheckResult | null; item?: StoredItem }> {
@@ -123,17 +123,9 @@ export async function precheckSeedance(modelId: string, url: string, kind: "imag
     return res;
   }
 
-  // Тот же файл уже проверяли (под другой ссылкой) — берём готовый вердикт
-  const fp = await fingerprint(url, kind);
-  if (fp) {
-    const known = (await readAt(fpFailPath(fp))) ?? (await readAt(fpPath(fp, scope)));
-    if (known?.status === "Failed") { await putJSON(path, { ...known, fp }); return known; }
-    if (known?.status === "Active" && known.assetId) {
-      const st = await assetStatus(known.assetId).catch(() => null);
-      if (st?.status === "Active") { await putJSON(path, { ...known, fp }); return known; }
-      if (st?.status === "Missing") await dropAt(fpPath(fp, scope));
-    }
-  }
+  // Повторное использование чужого ассета по «отпечатку» файла отключено: при совпадении отпечатков
+  // в генерацию мог уйти ассет другого файла. Каждый реф проверяется как отдельный ассет
+  const fp: string | null = null;
 
   if (throttledUntil > Date.now()) return { ok: false, retryAfter: Math.ceil((throttledUntil - Date.now()) / 1000) + 2, at: Date.now() };
   if (scope && (await overQuota(`precheck:${scope}`, LIMITS.precheckPerHour(), 3_600_000))) {
