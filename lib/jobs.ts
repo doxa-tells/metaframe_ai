@@ -287,7 +287,7 @@ export async function createJob(asked: GenRequest, origin: string, who: { id?: s
         taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: conv }, arkModel));
       } catch (e) {
         // Ассет успел исчезнуть из библиотеки BytePlus — повторяем с обычными ссылками (Seedance проверит рефы сам)
-        if (!/asset[^.]*not found/i.test((e as Error).message)) throw e;
+        if (!/asset[^.]*not found/i.test((e as Error).message)) throw await explainSeedanceParams(e, req, origin);
         const plain: Record<string, string[]> = {};
         for (const [k, v] of Object.entries(req.inputs ?? {})) plain[k] = await Promise.all((v ?? []).filter(Boolean).map((u) => toProviderUrl(u, origin)));
         taskId = await ark.seedanceSubmit(buildArkVideoBody({ ...req, inputs: plain }, arkModel));
@@ -316,11 +316,31 @@ export async function createJob(asked: GenRequest, origin: string, who: { id?: s
   const absInputs: Record<string, string[]> = {};
   for (const [k, v] of Object.entries(req.inputs ?? {})) absInputs[k] = (v ?? []).filter(Boolean).map((u) => toAbsolute(u, origin));
   const { endpoint, body } = buildHiggsfieldBody({ ...req, inputs: absInputs });
-  const sub = await hf.submit(endpoint, body, id);
+  const sub = await hf.submit(endpoint, body, id).catch(async (e) => { throw await explainSeedanceParams(e, req, origin); });
   const rec: JobRecord = { ...base, providerRequestId: sub.request_id, status: (sub.status as JobStatus) || "queued" };
   await putJSON(pendingPath(id), rec);
     await markPending(id, rec.providerRequestId!);
   return rec;
+}
+
+// Seedance с видео-референсом отклоняет длительность короче исходника и чужой формат,
+// но пишет об этом невнятно. Меряем видео сами и говорим, что именно поставить
+const SD_PARAM_ERR = /['`"]?(duration|ratio)['`"]?.*not valid|interpreted as video editing/i;
+async function explainSeedanceParams(e: unknown, req: GenRequest, origin: string): Promise<unknown> {
+  const msg = (e as Error)?.message ?? "";
+  const vids = (req.inputs?.video_urls ?? []).filter(Boolean);
+  if (!vids.length || !SD_PARAM_ERR.test(msg)) return e;
+  const { videoSeconds } = await import("./mediaprobe");
+  const secs = (await Promise.all(vids.map((u) => videoSeconds(u, origin).catch(() => null)))).filter((x): x is number => !!x);
+  const longest = secs.length ? Math.max(...secs) : null;
+  const asked = Number(req.params?.duration ?? 0);
+  const need = longest ? Math.ceil(longest) : null;
+  const len = longest ? `Видео-референс длится ${String(longest).replace(".", ",")} с. ` : "";
+  const dur = need
+    ? (asked < need ? `Поставьте длительность ${need} с или больше (сейчас ${asked} с)` : `Поставьте длительность ровно ${need} с`)
+    : "Поставьте длительность не меньше длины видео-референса, с округлением вверх";
+  const text = `${len}${dur} и формат «Авто»: при правке видео Seedance берёт длину и формат из исходника`;
+  return new hf.ProviderError(text, 400);
 }
 
 async function findJobFiles(id: string): Promise<{ pending?: StoredItem; done?: StoredItem }> {
