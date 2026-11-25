@@ -17,8 +17,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const envNum = (name: string, def: number) => { const n = Number(process.env[name]); return Number.isFinite(n) && n > 0 ? n : def; };
 
-// Регистрация: аккаунт создаётся «на проверке», генерации откроются после подтверждения личности владельцем.
-// google: true — завершение входа через Google: почта уже подтверждена Google и берётся из подписанного cookie, пароль не нужен
+// Регистрация: аккаунт открывается после подтверждения почты по ссылке из письма (lib/users: autoApprove).
+// google: true — завершение входа через Google: почта уже подтверждена Google и берётся из подписанного cookie, пароль не нужен,
+// аккаунт открыт сразу
 export async function POST(req: Request) {
   try {
     const b = await readJsonBody<Body>(req, 16_384);
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
       ...(g ? { emailVerified: Date.now() } : mailOn() ? { emailVerified: false as const } : {}),
       createdIp: ip, lastIp: ip, consent: { version: CONSENT_VERSION, at: Date.now(), ip },
     });
-    await logAction({ actor: "user", action: "register", userId: user.id, email: user.email, meta: { ip, consent: CONSENT_VERSION, via: g ? "google" : "password" } });
+    await logAction({ actor: "user", action: "register", userId: user.id, email: user.email, meta: { ip, consent: CONSENT_VERSION, via: g ? "google" : "password", ...(user.status === "active" ? { opened: "auto" } : {}) } });
     const mailed = !g && (await mailVerifyLink(user));
     const res = NextResponse.json({ ok: true, status: user.status, mailed });
     await startSession(res, user);

@@ -5,6 +5,10 @@ import { errorResponse } from "@/lib/http";
 import { LIMITS, overQuota, quotaError } from "@/lib/usage";
 import { tooMany } from "@/lib/ratelimit";
 import { RATE } from "@/lib/plans";
+import { hasCredits } from "@/lib/users";
+
+// Суточный лимит загрузок: у аккаунта без кредитов он меньше
+const uploadCap = (u: Parameters<typeof hasCredits>[0]) => (hasCredits(u) ? LIMITS.uploadsPerDay() : LIMITS.uploadsPerDayFree());
 
 const MAX_UPLOAD = (Number(process.env.MAX_UPLOAD_MB) || 100) * 1048576;
 
@@ -19,7 +23,7 @@ export async function POST(req: Request) {
     if (me.user) {
       if (tooMany(`upload:${me.uid}`, RATE.uploadsPerMin, 60_000)) throw quotaError(`Не больше ${RATE.uploadsPerMin} загрузок в минуту — подождите немного`);
       if (size > MAX_UPLOAD) return NextResponse.json({ error: `Файл больше ${Math.round(MAX_UPLOAD / 1048576)} МБ` }, { status: 413 });
-      if (await overQuota(`upload:${me.uid}`, LIMITS.uploadsPerDay(), 86_400_000)) throw quotaError("Слишком много загрузок за сутки");
+      if (await overQuota(`upload:${me.uid}`, uploadCap(me.user), 86_400_000)) throw quotaError(hasCredits(me.user) ? "Слишком много загрузок за сутки" : "Лимит загрузок без кредитов на балансе исчерпан — пополните баланс на странице «Кредиты»");
     }
   } catch (e) { return errorResponse(e); }
   if (!useWorker) return NextResponse.json({ error: "Хранилище R2 не настроено" }, { status: 400 });

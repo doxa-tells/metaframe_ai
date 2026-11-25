@@ -3,6 +3,7 @@ import { precheckDiagnostics, precheckSeedance } from "@/lib/precheck";
 import { errorResponse, readJsonBody, requestOrigin } from "@/lib/http";
 import { isOwnMediaUrl, OWN_MEDIA_ERROR } from "@/lib/storage";
 import { requireCtx } from "@/lib/me";
+import { hasCredits } from "@/lib/users";
 
 export const maxDuration = 60;
 
@@ -24,6 +25,9 @@ export async function POST(req: Request) {
     if (typeof modelId !== "string" || typeof url !== "string" || !modelId || !url || (kind !== "image" && kind !== "video")) return NextResponse.json({ error: "Нужны modelId, url и kind" }, { status: 400 });
     // BytePlus скачивает реф по этой ссылке от нашего имени — только файлы из хранилища студии
     if (me.user && !isOwnMediaUrl(url)) return NextResponse.json({ error: OWN_MEDIA_ERROR }, { status: 400 });
+    // Проверка занимает место в библиотеке ассетов BytePlus (она общая и небольшая) — только тем, кто может запустить генерацию
+    // Без кредитов реф не отклоняем, а пропускаем проверку: Seedance проверит его сам при запуске
+    if (me.user && !hasCredits(me.user)) return NextResponse.json({ ok: true, skipped: true, skipReason: "Референс проверится при запуске генерации: проверка заранее работает, когда на балансе есть кредиты", at: Date.now() });
     return NextResponse.json(await precheckSeedance(modelId, url, kind, requestOrigin(req), me.scope));
   } catch (e) {
     console.error("precheck failed:", (e as Error).message);

@@ -3,10 +3,12 @@ import { createHash, randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqua
 import { promisify } from "util";
 import { listItems, putPrivateJSON as putJSON, putPrivateJSONIf, readPrivateAt, readPrivateJSON as readJSON } from "./storage";
 import type { PlanId } from "./plans";
+import { logAction } from "./modlog";
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
-// Пользователи студии. Регистрация → «на проверке» → владелец подтверждает личность вручную.
+// Пользователи студии. Регистрация → подтверждение почты (ссылка из письма или вход через Google) → аккаунт открыт.
+// Ручное подтверждение владельцем — только при MANUAL_APPROVAL=1 или когда письма не настроены.
 // Нарушения: предупреждение, заморозка (на срок или бессрочно), бан. Всё пишется в журнал (lib/modlog).
 export type UserStatus = "pending" | "active" | "frozen" | "banned" | "rejected";
 export type UserWarning = { id: string; at: number; reason: string; jobId?: string; ack?: number };
@@ -31,7 +33,7 @@ export type UserRecord = {
   lastLoginAt?: number;
   lastIp?: string;
   verifiedAt?: number;
-  verifyNote?: string;   // как подтверждена личность (созвон, документ и т.п.)
+  verifyNote?: string;   // как подтверждён аккаунт: автоматически (почта, Google) или владельцем (созвон, документ и т.п.)
   consent: { version: string; at: number; ip?: string };
   warnings: UserWarning[];
   blocked: number[];     // время срабатываний модерации провайдеров (последние 50)
@@ -130,12 +132,38 @@ export async function createUser(input: Omit<UserRecord, "id" | "passHash" | "st
     blocked: [],
     blockedTotal: 0,
   };
+  autoApprove(rec); // через Google почта уже подтверждена — аккаунт открыт сразу
   await putJSON(userPath(rec.id), rec);
   await putJSON(emailPath(rec.email), { id: rec.id });
   cache.set(rec.id, { at: Date.now(), rec });
   usersCache = null;
   return rec;
 }
+
+// ---------- Открытие аккаунта ----------
+// Аккаунт открывается сам, как только подтверждена почта: ссылка из письма, вход через Google, сброс пароля по письму.
+// MANUAL_APPROVAL=1 возвращает ручное подтверждение владельцем. Без подтверждённой почты (письма не настроены
+// или аккаунт создан до них) — тоже вручную: открывать доступ совсем без проверки нельзя
+export const manualApproval = () => process.env.MANUAL_APPROVAL === "1";
+export const canAutoApprove = (u: UserRecord) => u.status === "pending" && typeof u.emailVerified === "number" && !manualApproval();
+export function autoApprove(u: UserRecord): boolean {
+  if (!canAutoApprove(u)) return false;
+  u.status = "active";
+  u.verifiedAt = Date.now();
+  u.verifyNote = u.googleSub ? "Автоматически: вход через Google" : "Автоматически: почта подтверждена";
+  return true;
+}
+// Правка карточки, после которой аккаунт может открыться сам, — с записью в журнал модерации
+export async function updateUserApproving(id: string, fn: (u: UserRecord) => void): Promise<UserRecord> {
+  let opened = false;
+  const u = await updateUser(id, (x) => { fn(x); opened = autoApprove(x); });
+  if (opened) await logAction({ actor: "system", action: "verify", userId: u.id, email: u.email, reason: u.verifyNote }).catch(() => {});
+  return u;
+}
+
+// Есть ли кредиты на балансе. Без них генерации и так не запускаются, а всё бесплатное (ассистент, загрузки,
+// проверка рефов, Soul ID) ограничено: регистрация открыта, и пустой аккаунт не должен тратить деньги студии
+export const hasCredits = (u: UserRecord) => (u.bal ?? u.credits ?? 0) > 0;
 
 let usersCache: { at: number; list: UserRecord[] } | null = null;
 export async function listUsers(fresh = false): Promise<UserRecord[]> {

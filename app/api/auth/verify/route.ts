@@ -1,21 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { appUrl, mailOn } from "@/lib/mail";
 import { mailVerifyLink, readVerifyToken } from "@/lib/authflow";
-import { getUser, updateUser } from "@/lib/users";
+import { getUser, updateUserApproving } from "@/lib/users";
 import { errorResponse } from "@/lib/http";
 import { requireCtx } from "@/lib/me";
 import { overQuota } from "@/lib/usage";
 
-// Ссылка из письма: подтверждает почту и ведёт в студию (или на вход)
+// Ссылка из письма: подтверждает почту, открывает аккаунт и ведёт в студию (или на вход)
 export async function GET(req: NextRequest) {
   const t = await readVerifyToken(req.nextUrl.searchParams.get("t"));
   const user = t ? await getUser(t.uid, true).catch(() => null) : null;
   if (!t || !user || user.email !== t.email) return NextResponse.redirect(`${appUrl()}/login?err=verify_bad`);
-  if (!user.emailVerified) await updateUser(user.id, (u) => { if (!u.emailVerified) u.emailVerified = Date.now(); }).catch(() => {});
+  if (!user.emailVerified || user.status === "pending") await updateUserApproving(user.id, (u) => { if (!u.emailVerified) u.emailVerified = Date.now(); }).catch(() => {});
   return NextResponse.redirect(`${appUrl()}/login?ok=verified`);
 }
 
-// Отправить письмо ещё раз (с экрана «Аккаунт на проверке»)
+// Отправить письмо ещё раз (с экрана «Подтвердите почту»)
 export async function POST() {
   try {
     const me = await requireCtx();

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { appUrl } from "@/lib/mail";
 import { OAUTH_COOKIE, SIGNUP_COOKIE, googleOn, signSignup, startSession } from "@/lib/authflow";
 import { sameStr, shortCookie } from "@/lib/session";
-import { effectiveStatus, findByEmail, updateUser } from "@/lib/users";
+import { effectiveStatus, findByEmail, updateUserApproving } from "@/lib/users";
 import { clientIp } from "@/lib/me";
 import { tooMany } from "@/lib/ratelimit";
 import { logAction } from "@/lib/modlog";
@@ -67,8 +67,8 @@ export async function GET(req: NextRequest) {
     await logAction({ actor: "user", action: "login_blocked", userId: user.id, email: user.email, meta: { ip, via: "google" } }).catch(() => {});
     return back("banned");
   }
-  // Google подтвердил, что почта принадлежит этому человеку
-  await updateUser(user.id, (x) => {
+  // Google подтвердил, что почта принадлежит этому человеку — аккаунт, ждавший подтверждения почты, открывается
+  await updateUserApproving(user.id, (x) => {
     x.lastLoginAt = Date.now(); x.lastIp = ip; x.googleSub ??= claims!.sub;
     if (!x.emailVerified) x.emailVerified = Date.now();
   }).catch(() => {});

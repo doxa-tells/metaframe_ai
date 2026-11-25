@@ -42,7 +42,7 @@ export async function POST(req: Request) {
     const { ack, claim } = await readJsonBody<{ ack?: string; claim?: string }>(req, 4096);
     if (typeof claim === "string") {
       // Заявка на оплату — только у подтверждённого аккаунта и не чаще нескольких раз в час (каждая пишется в журнал)
-      if (me.status !== "active" && me.status !== "frozen") return NextResponse.json({ error: "Аккаунт ещё на проверке" }, { status: 403 });
+      if (me.status !== "active" && me.status !== "frozen") return NextResponse.json({ error: "Аккаунт ещё не подтверждён" }, { status: 403 });
       if (tooMany(`claim:${me.uid}`, 5, 3_600_000)) return NextResponse.json({ error: "Заявка уже отправлена — дождитесь начисления" }, { status: 429 });
       const pkg = getPackage(claim);
       if (!pkg) return NextResponse.json({ error: "Нет такого пакета" }, { status: 400 });

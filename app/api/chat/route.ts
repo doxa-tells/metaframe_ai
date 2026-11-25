@@ -5,6 +5,7 @@ import { RATE } from "@/lib/plans";
 import { errorResponse, readJsonBody, requestOrigin } from "@/lib/http";
 import { requireCtx } from "@/lib/me";
 import { LIMITS, overQuota, quotaError } from "@/lib/usage";
+import { hasCredits } from "@/lib/users";
 
 export const maxDuration = 120;
 
@@ -67,8 +68,11 @@ export async function POST(req: Request) {
     if (me.user && chars > RATE.chatMaxChars) throw Object.assign(new Error("Чат стал слишком длинным для одного запроса — начните новый чат или сократите инструкции"), { status: 413 });
     if (me.user) {
       if (tooMany(`chat:${me.uid}`, RATE.chatPerMin, 60_000)) throw quotaError(`Не больше ${RATE.chatPerMin} сообщений ассистенту в минуту — подождите немного`);
-      if (LIMITS.chatPerDay() > 0 && (await overQuota(`chat:${me.uid}`, LIMITS.chatPerDay(), 86_400_000))) {
-        throw quotaError(`Лимит ассистента — ${LIMITS.chatPerDay()} сообщений в сутки. Продолжите завтра`);
+      const paid = hasCredits(me.user);
+      const cap = paid ? LIMITS.chatPerDay() : LIMITS.chatPerDayFree();
+      if (cap > 0 && (await overQuota(`chat:${me.uid}`, cap, 86_400_000))) {
+        throw quotaError(paid ? `Лимит ассистента — ${cap} сообщений в сутки. Продолжите завтра`
+          : `Без кредитов на балансе ассистент отвечает на ${cap} сообщений в сутки. Пополните баланс на странице «Кредиты» — лимит вырастет`);
       }
     }
   } catch (e) { return errorResponse(e); }

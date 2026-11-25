@@ -4,7 +4,7 @@ import { withBase } from "@/lib/base";
 import { Captcha } from "./Captcha";
 
 type Mode = "login" | "register" | "forgot";
-type Props = { google: boolean; siteKey: string | null; mail: boolean; signup: { email: string; name: string } | null };
+type Props = { google: boolean; siteKey: string | null; mail: boolean; manual: boolean; signup: { email: string; name: string } | null };
 const EMPTY = { name: "", email: "", phone: "", country: "", purpose: "", password: "", password2: "" };
 
 const NOTES: Record<string, { text: string; ok?: boolean }> = {
@@ -25,7 +25,7 @@ const GoogleIcon = () => (
   </svg>
 );
 
-export function LoginForm({ google, siteKey, mail, signup }: Props) {
+export function LoginForm({ google, siteKey, mail, manual, signup }: Props) {
   const [mode, setMode] = useState<Mode>("login");
   const [viaGoogle, setViaGoogle] = useState(false);
   const [email, setEmail] = useState("");
@@ -47,7 +47,7 @@ export function LoginForm({ google, siteKey, mail, signup }: Props) {
     const q = new URLSearchParams(window.location.search);
     const code = q.get("err") ?? q.get("ok");
     if (code && NOTES[code]) setNote(NOTES[code]);
-    // Вернулись от Google с новой почтой: осталось заполнить заявку
+    // Вернулись от Google с новой почтой: осталось заполнить данные
     if (q.get("google") === "new" && signup) {
       setMode("register");
       setViaGoogle(true);
@@ -96,6 +96,8 @@ export function LoginForm({ google, siteKey, mail, signup }: Props) {
 
   const switchTo = (m: Mode) => { setMode(m); setViaGoogle(false); setError(null); setNote(null); setSent(false); resetCaptcha(); };
   const needRegCaptcha = Boolean(siteKey) && !viaGoogle;
+  // Аккаунт открывается сам после подтверждения почты (через Google — сразу); вручную — если так настроено или письма выключены
+  const byHand = manual || (!viaGoogle && !mail);
   const googleBtn = google && (
     <>
       <div className="login-or">или</div>
@@ -144,8 +146,12 @@ export function LoginForm({ google, siteKey, mail, signup }: Props) {
 
       {mode === "register" && (
         <form className="login-box reg-box" onSubmit={register}>
-          <h1>{viaGoogle ? "Осталось заполнить заявку" : "Регистрация"}</h1>
-          <p className="muted small">Мы подтверждаем личность каждого пользователя. Указывайте настоящие данные — с вами свяжутся для проверки, после неё откроются генерации.</p>
+          <h1>{viaGoogle ? (byHand ? "Осталось заполнить заявку" : "Осталось заполнить данные") : "Регистрация"}</h1>
+          <p className="muted small">{byHand
+            ? "Мы подтверждаем личность каждого пользователя. Указывайте настоящие данные — с вами свяжутся для проверки, после неё откроются генерации."
+            : viaGoogle
+              ? "Почта подтверждена через Google. Укажите настоящие данные — студия откроется сразу."
+              : "Укажите настоящие данные. Мы пришлём письмо со ссылкой: подтвердите почту — и студия откроется."}</p>
           <input type="text" autoComplete="name" placeholder="Фамилия и имя, как в документе" value={f.name} onChange={set("name")} />
           <input type="email" autoComplete="email" placeholder="Почта" value={f.email} onChange={set("email")} readOnly={viaGoogle} className={viaGoogle ? "login-locked" : undefined}
             title={viaGoogle ? "Почта подтверждена через Google" : undefined} />
@@ -165,7 +171,7 @@ export function LoginForm({ google, siteKey, mail, signup }: Props) {
           {needRegCaptcha && siteKey && <Captcha key={captchaKey} siteKey={siteKey} onToken={setToken} />}
           {error && <div className="err small">{error}</div>}
           <button className="btn accent wide" disabled={busy || !terms || !likeness || !f.name || !f.email || !f.phone || !f.country || (!viaGoogle && !f.password) || (needRegCaptcha && !token)}>
-            {busy ? "Отправляю…" : "Отправить заявку"}
+            {busy ? "Отправляю…" : byHand ? "Отправить заявку" : "Зарегистрироваться"}
           </button>
           {!viaGoogle && googleBtn}
           <button type="button" className="linkbtn login-switch" onClick={() => switchTo("login")}>Уже есть аккаунт? Войти</button>

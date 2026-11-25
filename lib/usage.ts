@@ -34,6 +34,9 @@ const envNum = (name: string, def: number) => {
 };
 export const LIMITS = {
   chatPerDay: () => envNum("USER_CHAT_DAILY", 150),
+  // Аккаунт без кредитов на балансе (регистрация открыта для всех): ассистент и загрузки — понемногу
+  chatPerDayFree: () => envNum("USER_CHAT_DAILY_FREE", 10),
+  uploadsPerDayFree: () => envNum("USER_UPLOADS_DAILY_FREE", 20),
   soulPerDay: () => envNum("USER_SOUL_DAILY", 2),
   soulTotal: () => envNum("USER_SOUL_TOTAL", 10),
   uploadsPerDay: () => envNum("USER_UPLOADS_DAILY", 300),

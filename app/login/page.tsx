@@ -3,6 +3,7 @@ import { LoginForm } from "@/components/LoginForm";
 import { SIGNUP_COOKIE, googleOn, readSignup } from "@/lib/authflow";
 import { captchaOn, captchaSiteKey } from "@/lib/captcha";
 import { mailOn } from "@/lib/mail";
+import { manualApproval } from "@/lib/users";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ export default async function LoginPage() {
       google={googleOn()}
       siteKey={captchaOn() ? captchaSiteKey() : null}
       mail={mailOn()}
+      manual={manualApproval()}
       signup={g ? { email: g.email, name: g.name } : null}
     />
   );

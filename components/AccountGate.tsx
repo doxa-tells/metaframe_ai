@@ -3,7 +3,7 @@ import { useState } from "react";
 import { withBase } from "@/lib/base";
 import type { Me } from "./MeContext";
 
-// Экран вместо студии, пока аккаунт на проверке, отклонён или заблокирован
+// Экран вместо студии, пока аккаунт не подтверждён (почта или ручная проверка), отклонён или заблокирован
 export function AccountGate({ me }: { me: Extract<Me, { role: "user" }> }) {
   async function logout() {
     await fetch(withBase("/api/login"), { method: "DELETE" });
@@ -18,7 +18,9 @@ export function AccountGate({ me }: { me: Extract<Me, { role: "user" }> }) {
     setMail(r?.ok ? (d.verified ? "Почта уже подтверждена" : "Письмо отправлено — проверьте почту и папку «Спам»") : d.error ?? "Нет связи с сервером");
     setBusy(false);
   }
-  const t = me.status === "pending"
+  const t = me.status === "pending" && me.emailPending
+    ? { title: "Подтвердите почту", text: "Мы отправили письмо со ссылкой. Перейдите по ней — и студия откроется. Если письма нет, загляните в папку «Спам»." }
+    : me.status === "pending"
     ? { title: "Аккаунт на проверке", text: "Мы подтверждаем личность каждого пользователя вручную. Владелец студии свяжется с вами по телефону или почте, указанным при регистрации. Обычно это занимает до одного рабочего дня — после подтверждения генерации откроются автоматически." }
     : me.status === "rejected"
       ? { title: "Заявка отклонена", text: me.statusReason || "Подтвердить личность не удалось." }
@@ -32,12 +34,12 @@ export function AccountGate({ me }: { me: Extract<Me, { role: "user" }> }) {
         <div className="gate-who small">{me.name}<br /><span className="muted">{me.email}</span></div>
         {me.status === "pending" && me.emailPending && (
           <div className="gate-mail small">
-            Подтвердите почту: мы отправили письмо со ссылкой на {me.email}.
+            Письмо отправлено на {me.email}.
             <button className="linkbtn" disabled={busy} onClick={resend}>Отправить ещё раз</button>
             {mail && <div className="muted">{mail}</div>}
           </div>
         )}
-        {me.status === "pending" && <button className="btn wide" onClick={() => window.location.reload()}>Проверить снова</button>}
+        {me.status === "pending" && <button className="btn wide" onClick={() => window.location.reload()}>{me.emailPending ? "Я подтвердил почту" : "Проверить снова"}</button>}
         <a className="linkbtn gate-link" href={withBase("/terms")} target="_blank" rel="noreferrer">Правила студии</a>
         <button className="btn wide" onClick={logout}>Выйти</button>
       </div>

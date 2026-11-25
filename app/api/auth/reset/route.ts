@@ -4,7 +4,7 @@ import { clientIp } from "@/lib/me";
 import { mailOn } from "@/lib/mail";
 import { CAPTCHA_ERROR, verifyCaptcha } from "@/lib/captcha";
 import { mailResetLink, readResetToken, startSession } from "@/lib/authflow";
-import { effectiveStatus, findByEmail, getUser, hashPassword, updateUser } from "@/lib/users";
+import { effectiveStatus, findByEmail, getUser, hashPassword, updateUserApproving } from "@/lib/users";
 import { overQuota } from "@/lib/usage";
 import { tooMany } from "@/lib/ratelimit";
 import { logAction } from "@/lib/modlog";
@@ -43,7 +43,7 @@ export async function PUT(req: Request) {
     if (effectiveStatus(cur) === "banned") return NextResponse.json({ error: "Аккаунт заблокирован" }, { status: 403 });
     const passHash = await hashPassword(password);
     let used = false;
-    const user = await updateUser(cur.id, (u) => {
+    const user = await updateUserApproving(cur.id, (u) => {
       if (u.ver !== t.ver) { used = true; return; }
       u.passHash = passHash;
       u.ver = (u.ver ?? 1) + 1; // прежние сессии и эта ссылка перестают работать

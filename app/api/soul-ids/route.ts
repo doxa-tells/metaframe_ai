@@ -5,7 +5,7 @@ import { errorResponse, readJsonBody, requestOrigin } from "@/lib/http";
 import { isOwnMediaUrl, OWN_MEDIA_ERROR, toAbsolute } from "@/lib/storage";
 import { requireCtx } from "@/lib/me";
 import { LIMITS, overQuota, quotaError } from "@/lib/usage";
-import { updateUser } from "@/lib/users";
+import { hasCredits, updateUser } from "@/lib/users";
 import { logAction } from "@/lib/modlog";
 
 // Персонажи Soul ID живут в аккаунте Higgsfield владельца: пользователю показываем только созданных им
@@ -36,6 +36,8 @@ export async function POST(req: Request) {
     if (!images?.length) return NextResponse.json({ error: "Добавьте фото" }, { status: 400 });
     if (images.length > 100) return NextResponse.json({ error: "Максимум 100 фото" }, { status: 400 });
     if (me.user) {
+      // Обучение персонажа оплачивает студия — только тем, у кого есть кредиты
+      if (!hasCredits(me.user)) return NextResponse.json({ error: "Создать Soul ID можно, когда на балансе есть кредиты" }, { status: 403 });
       if ((me.user.souls ?? []).length >= LIMITS.soulTotal()) throw quotaError(`Максимум ${LIMITS.soulTotal()} персонажей Soul ID на аккаунт — напишите владельцу, если нужно больше`);
       if (await overQuota(`soul:${me.uid}`, LIMITS.soulPerDay(), 86_400_000)) throw quotaError(`Не больше ${LIMITS.soulPerDay()} новых Soul ID в сутки`);
     }
