@@ -6,6 +6,21 @@ const nextConfig: NextConfig = {
   basePath: BASE,
   // Результаты хранятся в R2, оптимизация картинок Next не нужна
   images: { unoptimized: true },
+  // Заголовки безопасности: студию нельзя встроить в чужую страницу (кликджекинг), тип файлов не угадывается,
+  // адрес страницы не уходит на чужие сайты, браузерные датчики выключены
+  async headers() {
+    return [{
+      source: "/:path*",
+      headers: [
+        { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+        { key: "X-Content-Type-Options", value: "nosniff" },
+        { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+        { key: "Strict-Transport-Security", value: "max-age=31536000" },
+      ],
+    }];
+  },
   async redirects() {
     // Корень домена и старые адреса без /studio ведут в студию
     return [

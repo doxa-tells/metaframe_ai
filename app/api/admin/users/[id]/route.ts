@@ -5,7 +5,7 @@ import { applyAction, creditSummary, limitOf, spentLastDay, type AdminAction } f
 import { ledgerHistory } from "@/lib/ledger";
 import { getUser, publicUser, validUid } from "@/lib/users";
 
-const ACTIONS: AdminAction[] = ["verify", "reject", "warn", "freeze", "unfreeze", "ban", "unban", "limit", "note", "credit"];
+const ACTIONS: AdminAction[] = ["verify", "reject", "warn", "freeze", "unfreeze", "ban", "unban", "limit", "note", "credit", "plan"];
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -26,9 +26,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     await requireCtx({ admin: true });
     const { id } = await ctx.params;
     if (!validUid(id)) return NextResponse.json({ error: "Некорректный id" }, { status: 400 });
-    const b = (await req.json()) as { action?: AdminAction; reason?: string; days?: number; limit?: number | null; amount?: number; receipt?: string };
+    const b = (await req.json()) as { action?: AdminAction; reason?: string; days?: number; limit?: number | null; amount?: number; receipt?: string; plan?: string };
     if (!b.action || !ACTIONS.includes(b.action)) return NextResponse.json({ error: "Неизвестное действие" }, { status: 400 });
-    const u = await applyAction(id, b.action, { reason: b.reason, days: Number(b.days) || undefined, limit: b.limit === null ? null : b.limit === undefined ? undefined : Number(b.limit), amount: Number(b.amount), receipt: typeof b.receipt === "string" && b.receipt.trim() ? b.receipt : undefined });
+    const u = await applyAction(id, b.action, { reason: b.reason, days: Number(b.days) || undefined, limit: b.limit === null ? null : b.limit === undefined ? undefined : Number(b.limit), amount: Number(b.amount), receipt: typeof b.receipt === "string" && b.receipt.trim() ? b.receipt : undefined, plan: typeof b.plan === "string" ? b.plan : undefined });
     return NextResponse.json({ user: publicUser(u), limit: limitOf(u) });
   } catch (e) {
     return errorResponse(e);

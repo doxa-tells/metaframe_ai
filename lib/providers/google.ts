@@ -11,12 +11,27 @@ export function googleKey(): string | null {
   return process.env.GEMINI_API_KEY?.trim() || process.env.GOOGLE_API_KEY?.trim() || null;
 }
 
-export async function fetchAsInline(url: string): Promise<{ mimeType: string; data: string }> {
-  const r = await withRetry(() => fetch(url, { cache: "no-store" })).catch((e) => { throw describeNetError(e, "хранилищем (референс)"); });
-  if (!r.ok) throw new ProviderError(`Не удалось загрузить референс (${r.status})`, 400);
+// Реф скачивается в память и уходит провайдеру как base64 — поэтому с потолком размера:
+// без него одна ссылка на огромный файл роняла копию функции вместе с чужими генерациями
+export const INLINE_IMAGE_MAX = 40 * 1048576;
+export const INLINE_VIDEO_MAX = 120 * 1048576;
+export async function fetchAsInline(url: string, maxBytes = INLINE_IMAGE_MAX): Promise<{ mimeType: string; data: string }> {
+  const r = await withRetry(() => fetch(url, { cache: "no-store", signal: AbortSignal.timeout(60_000) })).catch((e) => { throw describeNetError(e, "хранилищем (референс)"); });
+  if (!r.ok || !r.body) throw new ProviderError(`Не удалось загрузить референс (${r.status})`, 400);
+  const tooBig = () => new ProviderError(`Референс больше ${Math.round(maxBytes / 1048576)} МБ — уменьшите файл`, 413);
+  if (Number(r.headers.get("content-length") || 0) > maxBytes) { await r.body.cancel().catch(() => {}); throw tooBig(); }
   const mimeType = (r.headers.get("content-type") || "image/png").split(";")[0];
-  const buf = Buffer.from(await r.arrayBuffer());
-  return { mimeType, data: buf.toString("base64") };
+  const reader = r.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.length;
+    if (n > maxBytes) { await reader.cancel().catch(() => {}); throw tooBig(); }
+    chunks.push(value);
+  }
+  return { mimeType, data: Buffer.concat(chunks).toString("base64") };
 }
 
 export type NanoParams = {

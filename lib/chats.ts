@@ -27,8 +27,25 @@ export async function getChat(id: string, scope = ""): Promise<ChatRecord | null
   return it ? readJSON<ChatRecord>(it) : null;
 }
 
+const bad = () => Object.assign(new Error("Некорректный чат"), { status: 400 });
+const MAX_CHATS = 200;
+
 export async function saveChat(input: Partial<ChatRecord> & { name: string }, scope = ""): Promise<ChatRecord> {
   const now = Date.now();
+  if (!input || typeof input !== "object") throw bad();
+  if (input.name !== undefined && typeof input.name !== "string") throw bad();
+  if (input.instructions !== undefined && typeof input.instructions !== "string") throw bad();
+  if (input.messages !== undefined) {
+    if (!Array.isArray(input.messages)) throw bad();
+    for (const m of input.messages) {
+      if (!m || (m.role !== "user" && m.role !== "assistant") || typeof m.content !== "string") throw bad();
+      if (m.images !== undefined && (!Array.isArray(m.images) || m.images.length > 16 || m.images.some((u) => typeof u !== "string" || u.length > 2000))) throw bad();
+    }
+  }
+  // Новый чат: не больше MAX_CHATS на пользователя
+  if (!validChatId(input.id) && (await listItems(dirOf(scope), MAX_CHATS + 1)).items.length >= MAX_CHATS) {
+    throw Object.assign(new Error(`Не больше ${MAX_CHATS} чатов — удалите ненужные`), { status: 400 });
+  }
   const id = validChatId(input.id) ? input.id : randomUUID().slice(0, 18);
   const prev = validChatId(input.id) ? await getChat(id, scope) : null;
   const rec: ChatRecord = {

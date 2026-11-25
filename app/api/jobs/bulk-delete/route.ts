@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { jobScope, removeOutputs } from "@/lib/jobs";
-import { errorResponse } from "@/lib/http";
+import { errorResponse, readJsonBody } from "@/lib/http";
 import { requireCtx } from "@/lib/me";
 
 // Пакетное удаление: [{ id, indexes? }] — без indexes удаляется вся задача
 export async function POST(req: Request) {
   try {
-    const me = await requireCtx();
-    const { items: raw } = (await req.json()) as { items: { id: string; indexes?: number[] }[] };
+    const me = await requireCtx({ member: true });
+    const { items: raw } = await readJsonBody<{ items: { id: string; indexes?: number[] }[] }>(req, 262_144);
     if (!Array.isArray(raw) || raw.length > 500) return NextResponse.json({ error: "Некорректный список" }, { status: 400 });
     const results: Record<string, string> = {};
     // Удалять можно только своё

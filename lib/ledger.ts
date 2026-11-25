@@ -93,22 +93,30 @@ export async function ledgerSummary(uid: string, legacy = 0): Promise<LedgerSumm
 const err = (message: string, status: number) => Object.assign(new Error(message), { status });
 
 // Списание за задачу. Проверка → запись → повторная проверка: если параллельные списания увели баланс
-// в минус, своё списание откатываем (в худшем случае откажут оба запроса, но перерасхода не будет)
-export async function charge(uid: string, jobId: string, n: number, opts: { legacy?: number; dayLimit?: number } = {}): Promise<LedgerSummary> {
+// в минус или за суточный лимит, своё списание откатываем (в худшем случае откажут оба запроса, но перерасхода не будет).
+// perMin — не больше стольких запусков в минуту (считаем по тем же записям журнала, без отдельного счётчика)
+export async function charge(uid: string, jobId: string, n: number, opts: { legacy?: number; dayLimit?: number; perMin?: number } = {}): Promise<LedgerSummary> {
+  // Нулевая или нечисловая цена — это ошибка расчёта, а не бесплатная генерация
+  if (!(n > 0) || !Number.isFinite(n)) throw err("Не удалось рассчитать стоимость генерации — обновите страницу и попробуйте ещё раз", 400);
   const before = await ledgerSummary(uid, opts.legacy);
-  if (!(n > 0)) return before;
   const insufficient = (bal: number) => err(`Недостаточно кредитов: нужно ${r2(n)}, на балансе ${r2(Math.max(0, bal))}. Пополните баланс в разделе «Кредиты»`, 402);
+  const overDay = (spent: number) => err(`Суточный лимит ${opts.dayLimit} кредитов исчерпан (списано ${spent} за 24 часа). Попробуйте позже или напишите владельцу, чтобы поднять лимит`, 429);
   if (before.balance + 1e-9 < n) throw insufficient(before.balance);
-  if (opts.dayLimit !== undefined && before.dayCharged + n > opts.dayLimit + 1e-9) {
-    throw err(`Суточный лимит ${opts.dayLimit} кредитов исчерпан (списано ${before.dayCharged} за 24 часа). Попробуйте позже или напишите владельцу, чтобы поднять лимит`, 429);
+  if (opts.dayLimit !== undefined && before.dayCharged + n > opts.dayLimit + 1e-9) throw overDay(before.dayCharged);
+  if (opts.perMin !== undefined) {
+    const now = Date.now();
+    const recent = before.entries.filter((e) => e.type === "charge" && e.at && now - e.at < 60_000).length;
+    if (recent >= opts.perMin) throw err(`Слишком частые запуски: не больше ${opts.perMin} генераций в минуту. Подождите немного`, 429);
   }
   const p = await write(uid, "charge", jobId, -n);
   const { entries, items } = await listEntries(uid);
   const after = summarize(entries);
-  if (after.balance < -1e-9) {
+  const overBalance = after.balance < -1e-9;
+  const overLimit = opts.dayLimit !== undefined && after.dayCharged > opts.dayLimit + 1e-9;
+  if (overBalance || overLimit) {
     const it = items.get(p);
     if (it) await deleteItems([it]).catch(() => {});
-    throw insufficient(before.balance);
+    throw overBalance ? insufficient(before.balance) : overDay(before.dayCharged);
   }
   return after;
 }

@@ -27,6 +27,8 @@ export const storageMode: "worker" | "blob" | "local" = useWorker ? "worker" : u
 const encKey = (key: string) => key.split("/").map(encodeURIComponent).join("/");
 const workerUrl = (key: string) => `${WORKER_URL}/f/${encKey(key)}`;
 const auth = () => ({ Authorization: `Bearer ${WORKER_SECRET}` });
+// Служебные файлы (задачи, чаты, аккаунты) воркер отдаёт только с секретом; чужим адресам секрет не отправляем
+const ownHeaders = (url: string): Record<string, string> => (useWorker && url.startsWith(`${WORKER_URL}/`) ? auth() : {});
 
 async function workerFetch(input: string, init: RequestInit = {}): Promise<Response> {
   // Поток можно отправить только один раз — его не повторяем
@@ -51,16 +53,15 @@ async function workerFetch(input: string, init: RequestInit = {}): Promise<Respo
   return res;
 }
 
-// Подписанная ссылка для загрузки файла прямо из браузера в R2 (действует 15 минут)
-// max — предельный размер в байтах: входит в подпись, воркер отклоняет файл больше (после обновления воркера)
-export function signUpload(fileName: string, max?: number): { uploadUrl: string; url: string } {
+// Подписанная ссылка для загрузки файла прямо из браузера в R2 (действует 15 минут).
+// max — предельный размер в байтах: входит в подпись sig2, воркер отклоняет файл больше.
+// sig — подпись старого формата: её понимает только воркер прежней версии, новый требует sig2
+export function signUpload(fileName: string, max: number): { uploadUrl: string; url: string } {
   const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-60) || "file";
   const key = `uploads/${randomUUID().slice(0, 12)}-${safe}`;
   const exp = Math.floor(Date.now() / 1000) + 15 * 60;
   const sig = createHmac("sha256", WORKER_SECRET).update(`${key}:${exp}`).digest("hex");
-  if (!max) return { uploadUrl: `${workerUrl(key)}?exp=${exp}&sig=${sig}`, url: workerUrl(key) };
   const sig2 = createHmac("sha256", WORKER_SECRET).update(`${key}:${exp}:${max}`).digest("hex");
-  // sig — для старой версии воркера, sig2 + max — для новой (она проверяет размер)
   return { uploadUrl: `${workerUrl(key)}?exp=${exp}&sig=${sig}&max=${max}&sig2=${sig2}`, url: workerUrl(key) };
 }
 const LOCAL_DIR = path.join(process.cwd(), ".data");
@@ -166,7 +167,7 @@ export async function readJSON<T>(item: StoredItem | string): Promise<T | null> 
     } catch { return null; }
   }
   try {
-    const r = await fetch(url, { cache: "no-store" });
+    const r = await fetch(url, { cache: "no-store", headers: ownHeaders(url) });
     if (!r.ok) return null;
     return (await r.json()) as T;
   } catch { return null; }
@@ -174,12 +175,14 @@ export async function readJSON<T>(item: StoredItem | string): Promise<T | null> 
 
 // Личные данные (аккаунты, журнал модерации) шифруются: файлы в R2 читаются по прямой ссылке без ключа
 const privKey = () => createHash("sha256").update(`mf-private:${process.env.DATA_KEY || WORKER_SECRET || process.env.APP_PASSWORD || "local-dev"}`).digest();
-export async function putPrivateJSON(pathname: string, data: unknown): Promise<string> {
+function encryptPrivate(data: unknown): string {
   const iv = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", privKey(), iv);
   const enc = Buffer.concat([c.update(JSON.stringify(data), "utf8"), c.final()]);
-  const body = `mfenc1:${iv.toString("base64")}:${c.getAuthTag().toString("base64")}:${enc.toString("base64")}`;
-  return putFile(pathname, body, "application/octet-stream");
+  return `mfenc1:${iv.toString("base64")}:${c.getAuthTag().toString("base64")}:${enc.toString("base64")}`;
+}
+export async function putPrivateJSON(pathname: string, data: unknown): Promise<string> {
+  return putFile(pathname, encryptPrivate(data), "application/octet-stream");
 }
 export async function readPrivateJSON<T>(item: StoredItem | string): Promise<T | null> {
   const url = typeof item === "string" ? item : item.url;
@@ -189,11 +192,15 @@ export async function readPrivateJSON<T>(item: StoredItem | string): Promise<T |
     try { txt = await fs.readFile(path.join(LOCAL_DIR, lk), "utf8"); } catch { return null; }
   } else {
     try {
-      const r = await fetch(url, { cache: "no-store" });
+      const r = await fetch(url, { cache: "no-store", headers: ownHeaders(url) });
       if (!r.ok) return null;
       txt = await r.text();
     } catch { return null; }
   }
+  return decryptPrivate<T>(txt);
+}
+
+function decryptPrivate<T>(txt: string): T | null {
   const m = /^mfenc1:([^:]+):([^:]+):(.*)$/s.exec(txt.trim());
   if (!m) return null;
   try {
@@ -203,6 +210,72 @@ export async function readPrivateJSON<T>(item: StoredItem | string): Promise<T |
     return JSON.parse(plain) as T;
   } catch { return null; }
 }
+
+// Чтение по точному пути. В R2 — одним запросом (без листинга) и с меткой версии (etag) для условной записи
+export async function readPrivateAt<T>(pathname: string): Promise<{ data: T; etag?: string } | null> {
+  if (useWorker) {
+    let r: Response;
+    try {
+      // Временный сбой хранилища (5xx, обрыв) повторяем: по этому чтению решается, вошёл ли человек
+      r = await withRetry(async () => {
+        const x = await fetch(workerUrl(pathname), { cache: "no-store", headers: auth() });
+        if (x.status >= 500) throw Object.assign(new Error(`R2 ${x.status}`), { retryable: true, res: x });
+        return x;
+      }, { retryIf: (e) => isNetworkError(e) || Boolean((e as { retryable?: boolean }).retryable) });
+    } catch (e) {
+      const r5 = (e as { res?: Response }).res;
+      if (!r5) throw describeNetError(e, "хранилищем R2");
+      r = r5;
+    }
+    if (r.status === 404) return null;
+    if (!r.ok) throw Object.assign(new Error(`Хранилище R2 не ответило (${r.status})`), { status: 502 });
+    const data = decryptPrivate<T>(await r.text());
+    // Слабая метка (W/"…") для условной записи не годится — берём её сильную форму
+    const etag = r.headers.get("etag")?.replace(/^W\//, "") || undefined;
+    return data === null ? null : { data, etag };
+  }
+  const { items } = await listItems(pathname, 1);
+  const it = items.find((i) => i.pathname === pathname);
+  const data = it ? await readPrivateJSON<T>(it) : null;
+  return data === null ? null : { data };
+}
+
+// Условная запись: ifMatch — метка версии, с которой читали. Файл успели изменить — ошибка с conflict: true
+export async function putPrivateJSONIf(pathname: string, data: unknown, ifMatch?: string): Promise<void> {
+  if (!useWorker || !ifMatch) { await putPrivateJSON(pathname, data); return; }
+  const r = await fetch(workerUrl(pathname), {
+    method: "PUT", cache: "no-store",
+    headers: { ...auth(), "Content-Type": "application/octet-stream", "If-Match": ifMatch },
+    body: encryptPrivate(data),
+  }).catch((e) => { throw describeNetError(e, "хранилищем R2"); });
+  if (r.status === 412) throw Object.assign(new Error("Запись изменена параллельно"), { status: 409, conflict: true });
+  if (!r.ok) throw Object.assign(new Error(`Хранилище R2 не ответило (${r.status})`), { status: 502 });
+}
+
+// ---------- Чьи это ссылки ----------
+// Сервер скачивает рефы и передаёт их провайдерам — принимаем только файлы из своего хранилища
+// (загруженные рефы и готовые результаты), иначе сервером можно ходить по чужим и внутренним адресам
+const OWN_PREFIXES = ["uploads/", "out/"];
+export function isOwnMediaUrl(url: unknown): url is string {
+  if (typeof url !== "string" || !url || url.length > 2000) return false;
+  const lk = localKeyOf(url);
+  if (lk !== null) return storageMode === "local" && !lk.includes("..") && OWN_PREFIXES.some((p) => lk.startsWith(p));
+  if (useWorker) {
+    const root = `${WORKER_URL}/f/`;
+    if (!url.startsWith(root)) return false;
+    let key: string;
+    try { key = decodeURIComponent(url.slice(root.length).split(/[?#]/)[0]); } catch { return false; }
+    return !key.includes("..") && OWN_PREFIXES.some((p) => key.startsWith(p));
+  }
+  if (useBlob) {
+    try {
+      const u = new URL(url);
+      return u.protocol === "https:" && u.hostname.endsWith(".public.blob.vercel-storage.com") && OWN_PREFIXES.some((p) => u.pathname.slice(1).startsWith(p));
+    } catch { return false; }
+  }
+  return false;
+}
+export const OWN_MEDIA_ERROR = "Референс должен быть загружен в студию: добавьте файл через кнопку загрузки или выберите его из своих генераций";
 
 export async function deleteItems(items: StoredItem[]): Promise<void> {
   if (!items.length) return;

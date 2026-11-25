@@ -7,7 +7,7 @@ import { listItems, putPrivateJSON as putJSON, readPrivateJSON as readJSON } fro
 export type ModAction =
   | "register" | "verify" | "reject" | "warn" | "freeze" | "unfreeze" | "ban" | "unban"
   | "takedown" | "auto_flag" | "auto_freeze" | "limit" | "note" | "login_blocked" | "password"
-  | "credit" | "payment_claim";
+  | "credit" | "payment_claim" | "plan";
 
 export type ModEntry = {
   id: string;

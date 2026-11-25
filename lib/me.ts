@@ -26,8 +26,11 @@ const STATUS_TEXT: Record<UserStatus, string> = {
   rejected: "Заявка на доступ отклонена",
 };
 
-// active — можно тратить деньги (генерации, загрузки, чат); admin — только владелец
-export async function requireCtx(opts: { active?: boolean; admin?: boolean } = {}): Promise<Ctx> {
+// active — можно тратить деньги (генерации, загрузки, чат);
+// member — аккаунт подтверждён владельцем (активен или заморожен): доступ к своим данным в студии.
+//          Аккаунты «на проверке» и отклонённые видят только экран ожидания и в хранилище ничего не пишут;
+// admin — только владелец
+export async function requireCtx(opts: { active?: boolean; member?: boolean; admin?: boolean } = {}): Promise<Ctx> {
   const ctx = await getCtx();
   if (!ctx) throw fail("Нужен вход", 401);
   if (ctx.status === "banned") throw fail(STATUS_TEXT.banned, 401);
@@ -36,6 +39,7 @@ export async function requireCtx(opts: { active?: boolean; admin?: boolean } = {
     const why = ctx.user?.statusReason ? `: ${ctx.user.statusReason}` : "";
     throw fail(STATUS_TEXT[ctx.status] + (ctx.status === "frozen" ? why : ""), 403);
   }
+  if (opts.member && ctx.status !== "active" && ctx.status !== "frozen") throw fail(STATUS_TEXT[ctx.status], 403);
   return ctx;
 }
 

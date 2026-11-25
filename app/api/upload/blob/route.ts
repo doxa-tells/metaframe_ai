@@ -4,8 +4,8 @@ import { requireCtx } from "@/lib/me";
 
 // Прямая загрузка из браузера в Vercel Blob (обходит лимит 4.5 МБ на тело запроса)
 export async function POST(req: Request) {
-  const body = (await req.json()) as HandleUploadBody;
   try {
+    const body = (await req.json()) as HandleUploadBody;
     const json = await handleUpload({
       body,
       request: req,
@@ -22,6 +22,7 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(json);
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    console.error("[upload/blob]", (e as Error).message);
+    return NextResponse.json({ error: "Не удалось начать загрузку" }, { status: 400 });
   }
 }

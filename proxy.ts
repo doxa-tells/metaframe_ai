@@ -1,9 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { AUTH_COOKIE, readSession } from "./lib/session";
 
-const PUBLIC = new Set(["/login", "/api/login", "/api/register", "/terms"]);
+// Открыто без входа: вход и регистрация, правила, вход через Google, ссылки из писем, сброс пароля.
+// /api/cron/sweep — будильник воркера хранилища: внутри проверяется подпись
+const PUBLIC = new Set([
+  "/login", "/api/login", "/api/register", "/terms",
+  "/api/auth/google", "/api/auth/google/callback", "/api/auth/verify", "/api/auth/reset", "/reset",
+  "/api/cron/sweep",
+]);
 
-// Всё приложение закрыто входом (владелец — APP_PASSWORD, пользователи — почта и пароль), кроме входа и правил.
+// Всё приложение закрыто входом (владелец — APP_PASSWORD, пользователи — почта и пароль или Google), кроме списка выше.
 // Здесь проверяется только подпись cookie; статус аккаунта (бан, заморозка) проверяют API и страницы.
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;

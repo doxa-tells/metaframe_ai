@@ -44,7 +44,7 @@ export function humanizeError(status: string, raw?: string | null): HumanError {
 // Одной строкой — для подсказок под полем ввода
 export function humanizeMessage(raw: string): string {
   // Сообщения про аккаунт и лимиты студии уже человеческие
-  if (/Аккаунт|Суточный лимит|Нужен вход|Soul ID вам недоступен|Только для владельца|Заявка на доступ|Недостаточно кредитов|Seedance правит видео целиком|Seedance понял промпт как правку видео/.test(raw)) return raw;
+  if (/Аккаунт|Суточный лимит|Лимит пакета|Лимит ассистента|Слишком част|Не больше \d+|Референс должен|Не удалось рассчитать|Нужен вход|Soul ID вам недоступен|Только для владельца|Заявка на доступ|Недостаточно кредитов|Seedance правит видео целиком|Seedance понял промпт как правку видео/.test(raw)) return raw;
   const h = humanizeError("failed", raw);
   return h.kind === "other" || h.kind === "params" ? raw : `${h.title}: ${h.text}${h.hint ? `. ${h.hint}` : ""}`;
 }

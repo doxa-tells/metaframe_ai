@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { listSoulIds, createSoulId } from "@/lib/providers/higgsfield";
 import { MOCK } from "@/lib/jobs";
-import { errorResponse, requestOrigin } from "@/lib/http";
-import { toAbsolute } from "@/lib/storage";
+import { errorResponse, readJsonBody, requestOrigin } from "@/lib/http";
+import { isOwnMediaUrl, OWN_MEDIA_ERROR, toAbsolute } from "@/lib/storage";
 import { requireCtx } from "@/lib/me";
 import { LIMITS, overQuota, quotaError } from "@/lib/usage";
 import { updateUser } from "@/lib/users";
@@ -11,7 +11,7 @@ import { logAction } from "@/lib/modlog";
 // Персонажи Soul ID живут в аккаунте Higgsfield владельца: пользователю показываем только созданных им
 export async function GET() {
   try {
-    const me = await requireCtx();
+    const me = await requireCtx({ member: true });
     const own = new Set(me.user?.souls ?? []);
     if (MOCK) {
       const items = me.admin ? [{ id: "mock-soul", name: "Тестовый персонаж", status: "completed" }] : [...own].map((id) => ({ id, name: "Мой персонаж", status: "completed" }));
@@ -27,7 +27,11 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const me = await requireCtx({ active: true });
-    const { name, images } = (await req.json()) as { name: string; images: string[] };
+    const { name, images } = await readJsonBody<{ name: string; images: string[] }>(req, 262_144);
+    if (typeof name !== "string" || !Array.isArray(images)) return NextResponse.json({ error: "Некорректный запрос" }, { status: 400 });
+    if (name.length > 80) return NextResponse.json({ error: "Имя длиннее 80 символов" }, { status: 400 });
+    // Фото для обучения персонажа — только загруженные в студию файлы
+    if (me.user && images.some((u) => !isOwnMediaUrl(u))) return NextResponse.json({ error: OWN_MEDIA_ERROR }, { status: 400 });
     if (!name?.trim()) return NextResponse.json({ error: "Укажите имя" }, { status: 400 });
     if (!images?.length) return NextResponse.json({ error: "Добавьте фото" }, { status: 400 });
     if (images.length > 100) return NextResponse.json({ error: "Максимум 100 фото" }, { status: 400 });

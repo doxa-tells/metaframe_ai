@@ -495,7 +495,77 @@ export type GenRequest = {
   inputs: GenInputs;
 };
 
-// Проверка и нормализация запроса. Возвращает текст ошибки или null.
+// Приведение запроса к виду, которому можно доверять: сервер вызывает это до расчёта цены и до отправки провайдеру.
+// — параметры только из описания режима; не присланные получают значение по умолчанию (иначе цена могла стать нулевой,
+//   а провайдер подставил бы своё значение за наш счёт);
+// — каждое значение своего типа: массив или объект на месте строки не проходит;
+// — входы — только массивы строк и только те, что есть у режима.
+export const MAX_PROMPT = 20_000;
+export function normalizeRequest(raw: GenRequest): { ok: true; req: GenRequest } | { ok: false; error: string } {
+  const bad = (error: string) => ({ ok: false as const, error });
+  if (!raw || typeof raw !== "object") return bad("Некорректный запрос");
+  const model = typeof raw.modelId === "string" ? getModel(raw.modelId) : undefined;
+  if (!model) return bad("Неизвестная модель");
+  const mode = model.modes.find((m) => m.id === raw.modeId);
+  if (!mode) return bad("Неизвестный режим");
+  if (raw.prompt !== undefined && raw.prompt !== null && typeof raw.prompt !== "string") return bad("Некорректный промпт");
+  const prompt = raw.prompt ?? "";
+  if (prompt.length > MAX_PROMPT) return bad(`Промпт длиннее ${MAX_PROMPT} символов`);
+
+  const src = raw.params && typeof raw.params === "object" && !Array.isArray(raw.params) ? raw.params : {};
+  const params: Record<string, unknown> = {};
+  const empty = (v: unknown) => v === undefined || v === null || v === "";
+  for (const p of mode.params) {
+    let v = src[p.key];
+    if (empty(v) && "default" in p) v = p.default;
+    if (empty(v)) continue;
+    switch (p.type) {
+      case "select": {
+        if (typeof v !== "string" && typeof v !== "number") return bad(`${p.label}: недопустимое значение`);
+        if (!p.options.some((o) => o.value === String(v))) return bad(`${p.label}: недопустимое значение`);
+        params[p.key] = String(v);
+        break;
+      }
+      case "slider": {
+        const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN;
+        if (!Number.isFinite(n) || n < p.min || n > p.max) return bad(`${p.label}: от ${p.min} до ${p.max}`);
+        if (p.step >= 1 && !Number.isInteger(n)) return bad(`${p.label}: только целое число`);
+        params[p.key] = n;
+        break;
+      }
+      case "toggle": {
+        if (typeof v !== "boolean") return bad(`${p.label}: недопустимое значение`);
+        params[p.key] = v;
+        break;
+      }
+      case "seed": {
+        const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+        if (Number.isInteger(n) && n >= 1 && n <= 4_294_967_295) params[p.key] = n;
+        break;
+      }
+      default: { // text, soulid, preset
+        if (typeof v !== "string" || v.length > 200) return bad(`${p.label}: недопустимое значение`);
+        params[p.key] = v;
+      }
+    }
+  }
+  // Длительность исходника: для пользователей её заново определяет сервер, здесь — только число
+  const sd = src[SRC_DURATION];
+  if (mode.source && typeof sd === "number" && Number.isFinite(sd) && sd > 0) params[SRC_DURATION] = sd;
+
+  const rawInputs = raw.inputs && typeof raw.inputs === "object" && !Array.isArray(raw.inputs) ? raw.inputs : {};
+  const inputs: GenInputs = {};
+  for (const inp of mode.inputs) {
+    const list = rawInputs[inp.key];
+    if (list === undefined || list === null) continue;
+    if (!Array.isArray(list) || list.some((u) => typeof u !== "string" || u.length > 2000)) return bad(`${inp.label}: некорректные файлы`);
+    const clean = list.filter(Boolean);
+    if (clean.length) inputs[inp.key] = clean;
+  }
+  return { ok: true, req: { modelId: model.id, modeId: mode.id, prompt, params, inputs } };
+}
+
+// Проверка запроса. Возвращает текст ошибки или null.
 export function validateRequest(req: GenRequest): string | null {
   const model = getModel(req.modelId);
   if (!model) return "Неизвестная модель";

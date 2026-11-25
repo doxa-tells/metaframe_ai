@@ -3,6 +3,13 @@ main = "src/index.js"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
+# Адрес студии для будильника (доводка задач и очередь генераций)
+[vars]
+APP_URL = "https://metaframe-ai.vercel.app/studio"
+
+[triggers]
+crons = ["*/2 * * * *"]
+
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "metaframe"

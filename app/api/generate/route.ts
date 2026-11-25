@@ -1,42 +1,59 @@
 import { NextResponse } from "next/server";
-import { createJob, newJobId } from "@/lib/jobs";
-import { errorResponse, requestOrigin } from "@/lib/http";
-import { clientIp, requireCtx } from "@/lib/me";
-import { chargeCredits, refundCredits } from "@/lib/moderation";
-import { getMode, getModel, SRC_DURATION, validateRequest, type GenRequest } from "@/lib/models";
+import { createJob, laneOf, newJobId, releaseSlot, reserveSlot } from "@/lib/jobs";
+import { errorResponse, readJsonBody, requestOrigin } from "@/lib/http";
+import { requireCtx } from "@/lib/me";
+import { chargeCredits, ensurePlan, refundCredits } from "@/lib/moderation";
+import { getMode, getModel, normalizeRequest, SRC_DURATION, validateRequest, type GenRequest } from "@/lib/models";
 import { creditsFor } from "@/lib/credits";
 import { videoSeconds } from "@/lib/mediaprobe";
+import { isOwnMediaUrl, OWN_MEDIA_ERROR } from "@/lib/storage";
+import { PLAN_NAMES, concurrencyOf } from "@/lib/plans";
 
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
   try {
     const me = await requireCtx({ active: true });
-    const body = (await req.json()) as GenRequest;
-    if (!me.user) return NextResponse.json({ job: await createJob(body, requestOrigin(req)) });
+    const raw = await readJsonBody<GenRequest>(req, 262_144);
+    if (!me.user) return NextResponse.json({ job: await createJob(raw, requestOrigin(req)) });
 
-    // Пользователь: кредиты списываются до запуска; не прошёл запуск — возвращаются (по журналу, ровно один раз)
+    // Пользователь. Запрос приводится к доверенному виду (параметры по умолчанию, типы), и только по нему считается цена
+    const norm = normalizeRequest(raw);
+    if (!norm.ok) return NextResponse.json({ error: norm.error }, { status: 400 });
+    const body = norm.req;
     const bad = validateRequest(body);
     if (bad) return NextResponse.json({ error: bad }, { status: 400 });
     const model = getModel(body.modelId)!;
     const mode = getMode(model, body.modeId);
     // Цена «за секунду исходника» считается по длительности, которую определил сервер, а не браузер
     if (mode.source) {
-      const src = body.inputs?.video_url?.[0];
+      const src = body.inputs.video_url?.[0];
+      if (src && !isOwnMediaUrl(src)) return NextResponse.json({ error: OWN_MEDIA_ERROR }, { status: 400 });
       const sec = src ? await videoSeconds(src, requestOrigin(req)) : null;
       if (sec && mode.source.strict && sec > mode.source.max + 0.5) {
         return NextResponse.json({ error: `Видео длиннее ${mode.source.max} с — обрежьте его` }, { status: 400 });
       }
-      body.params = { ...(body.params ?? {}), [SRC_DURATION]: sec ?? mode.source.max };
+      body.params = { ...body.params, [SRC_DURATION]: sec ?? mode.source.max };
     }
     const credits = creditsFor(body);
+    if (!(credits > 0)) return NextResponse.json({ error: "Не удалось рассчитать стоимость генерации — обновите страницу и попробуйте ещё раз" }, { status: 400 });
+
+    // Порядок: слот (лимит одновременных генераций по пакету) → кредиты → запуск. Что-то не прошло — всё откатывается
+    const plan = await ensurePlan(me.user);
     const id = newJobId(model.kind, me.uid);
-    await chargeCredits(me.user, id, credits);
+    const active = await reserveSlot(id, laneOf(model), concurrencyOf(plan, model.kind), PLAN_NAMES[plan]);
     try {
-      const job = await createJob(body, requestOrigin(req), { id, uid: me.uid, ip: clientIp(req), souls: me.user.souls ?? [], credits });
+      await chargeCredits(me.user, id, credits, plan);
+    } catch (e) {
+      await releaseSlot(id).catch(() => {});
+      throw e;
+    }
+    try {
+      const job = await createJob(body, requestOrigin(req), { id, uid: me.uid, souls: me.user.souls ?? [], credits, active });
       return NextResponse.json({ job });
     } catch (e) {
       await refundCredits(me.uid, id, credits, "задача не запустилась").catch(() => {});
+      await releaseSlot(id).catch(() => {});
       throw e;
     }
   } catch (e) {

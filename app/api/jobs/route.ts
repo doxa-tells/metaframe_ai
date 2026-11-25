@@ -6,7 +6,7 @@ import { requireCtx } from "@/lib/me";
 // Каждый видит только свои генерации
 export async function GET(req: Request) {
   try {
-    const { scope } = await requireCtx();
+    const { scope } = await requireCtx({ member: true });
     after(() => sweepPending().catch((e) => console.error("sweep:", (e as Error).message)));
     const u = new URL(req.url);
     const kind = u.searchParams.get("kind") === "video" ? "video" : "image";

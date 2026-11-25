@@ -5,7 +5,7 @@ import { requireCtx } from "@/lib/me";
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const me = await requireCtx();
+    const me = await requireCtx({ member: true });
     const { id } = await ctx.params;
     if (jobScope(id) !== me.scope) return NextResponse.json({ error: "Не найдено" }, { status: 404 });
     await deleteJob(id);

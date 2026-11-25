@@ -1,6 +1,8 @@
 import { googleKey, GEMINI_CHAT_MODEL, fetchAsInline } from "@/lib/providers/google";
-import { localKeyOf, readLocalFile, toAbsolute } from "@/lib/storage";
-import { errorResponse, requestOrigin } from "@/lib/http";
+import { isOwnMediaUrl, localKeyOf, OWN_MEDIA_ERROR, readLocalFile, toAbsolute } from "@/lib/storage";
+import { tooMany } from "@/lib/ratelimit";
+import { RATE } from "@/lib/plans";
+import { errorResponse, readJsonBody, requestOrigin } from "@/lib/http";
 import { requireCtx } from "@/lib/me";
 import { LIMITS, overQuota, quotaError } from "@/lib/usage";
 
@@ -17,7 +19,7 @@ async function inline(url: string, origin: string) {
     const buf = await readLocalFile(lk);
     if (buf) return { mimeType: url.endsWith(".svg") ? "image/svg+xml" : "image/png", data: buf.toString("base64") };
   }
-  return fetchAsInline(toAbsolute(url, origin));
+  return fetchAsInline(toAbsolute(url, origin), 20 * 1048576);
 }
 
 // Разбор SSE-потока: вызывает onData для каждой строки data:
@@ -45,18 +47,35 @@ async function readSSE(res: Response, onData: (json: Record<string, unknown>) =>
 }
 
 export async function POST(req: Request) {
+  let body: Body;
   try {
     const me = await requireCtx({ active: true });
-    // Чат с ИИ бесплатный для пользователя, поэтому ограничен числом сообщений в сутки
-    if (me.user && LIMITS.chatPerDay() > 0 && (await overQuota(`chat:${me.uid}`, LIMITS.chatPerDay(), 86_400_000))) {
-      throw quotaError(`Лимит ассистента — ${LIMITS.chatPerDay()} сообщений в сутки. Продолжите завтра`);
+    // Чат с ИИ бесплатный для пользователя, поэтому ограничен: размер запроса, частота, число сообщений в сутки.
+    // Сначала дешёвые проверки (размер и форма), потом счётчик — отклонённый запрос попытку не тратит
+    body = await readJsonBody<Body>(req, 2_097_152);
+    if (!Array.isArray(body?.messages) || (body.system !== undefined && typeof body.system !== "string")) throw Object.assign(new Error("Некорректный запрос"), { status: 400 });
+    let chars = (body.system ?? "").length;
+    for (const m of body.messages) {
+      if (!m || (m.role !== "user" && m.role !== "assistant") || (m.content !== undefined && typeof m.content !== "string")) throw Object.assign(new Error("Некорректный запрос"), { status: 400 });
+      chars += (m.content ?? "").length;
+      if (m.images !== undefined) {
+        if (!Array.isArray(m.images) || m.images.length > RATE.chatMaxImages) throw Object.assign(new Error(`Не больше ${RATE.chatMaxImages} картинок в одном сообщении`), { status: 400 });
+        // Картинки сервер скачивает сам — только файлы из хранилища студии
+        if (me.user && m.images.some((u) => !isOwnMediaUrl(u))) throw Object.assign(new Error(OWN_MEDIA_ERROR), { status: 400 });
+      }
+    }
+    if (me.user && chars > RATE.chatMaxChars) throw Object.assign(new Error("Чат стал слишком длинным для одного запроса — начните новый чат или сократите инструкции"), { status: 413 });
+    if (me.user) {
+      if (tooMany(`chat:${me.uid}`, RATE.chatPerMin, 60_000)) throw quotaError(`Не больше ${RATE.chatPerMin} сообщений ассистенту в минуту — подождите немного`);
+      if (LIMITS.chatPerDay() > 0 && (await overQuota(`chat:${me.uid}`, LIMITS.chatPerDay(), 86_400_000))) {
+        throw quotaError(`Лимит ассистента — ${LIMITS.chatPerDay()} сообщений в сутки. Продолжите завтра`);
+      }
     }
   } catch (e) { return errorResponse(e); }
-  const body = (await req.json()) as Body;
   const origin = requestOrigin(req);
   // Без правил по умолчанию: системный промпт — только инструкции проекта, если они есть
   const system = (body.system ?? "").trim();
-  const all = (body.messages ?? []).filter((m) => m.content?.trim() || m.images?.length).slice(-60);
+  const all = body.messages.filter((m) => m.content?.trim() || m.images?.length).slice(-60);
   // Картинки отправляем только из последних 4 сообщений с картинками, в остальных — пометка
   let withImages = 0;
   const messages = [...all].reverse().map((m) => {
@@ -126,7 +145,9 @@ export async function POST(req: Request) {
           write("Чат не настроен: добавьте GEMINI_API_KEY или ANTHROPIC_API_KEY в переменные окружения.");
         }
       } catch (e) {
-        write(`\n\n⚠️ ${(e as Error).message}`);
+        console.error("[chat]", (e as Error).message);
+        const st = (e as { status?: number }).status;
+        write(`\n\n⚠️ ${st && st >= 400 && st < 500 ? (e as Error).message : "Ассистент сейчас недоступен — попробуйте ещё раз через минуту"}`);
       } finally {
         controller.close();
       }

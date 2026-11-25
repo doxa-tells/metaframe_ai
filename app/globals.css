@@ -1006,3 +1006,15 @@ input[type=email]:focus, input[type=tel]:focus { border-color: #2b4c5b; }
 .ud-ledger-row { display: grid; grid-template-columns: 130px 1fr auto; gap: 10px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
 .ud-ledger-row b.neg { color: #ff8a8a; }
 .ud-ledger-row b.pos { color: #6ff0a0; }
+
+/* ---------- Вход: Google, капча, сброс пароля ---------- */
+.login-or { display: flex; align-items: center; gap: 10px; width: 100%; color: var(--muted); font-size: 12px; }
+.login-or::before, .login-or::after { content: ""; flex: 1; height: 1px; background: var(--line2); }
+.btn.google { display: flex; align-items: center; justify-content: center; gap: 10px; background: #fff; color: #1f1f1f; border-color: #fff; font-weight: 600; text-decoration: none; }
+.btn.google:hover { background: #f1f3f4; }
+.btn.google svg { flex-shrink: 0; }
+.captcha { min-height: 65px; display: flex; justify-content: center; width: 100%; }
+.login-ok { color: var(--accent); }
+.login-links { display: flex; justify-content: space-between; gap: 12px; width: 100%; flex-wrap: wrap; }
+.login-locked { opacity: .7; }
+.gate-mail { background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; align-items: center; text-align: center; }

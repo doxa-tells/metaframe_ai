@@ -1,7 +1,8 @@
 import "server-only";
 import { createHash, randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual } from "crypto";
 import { promisify } from "util";
-import { listItems, putPrivateJSON as putJSON, readPrivateJSON as readJSON } from "./storage";
+import { listItems, putPrivateJSON as putJSON, putPrivateJSONIf, readPrivateAt, readPrivateJSON as readJSON } from "./storage";
+import type { PlanId } from "./plans";
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
@@ -17,7 +18,10 @@ export type UserRecord = {
   phone: string;
   country: string;
   purpose: string;       // для чего нужна студия
-  passHash: string;
+  passHash: string;      // пусто — вход только через Google (пароль можно задать через «Забыли пароль»)
+  googleSub?: string;    // идентификатор аккаунта Google, если входил через него
+  emailVerified?: number | false; // когда подтверждена почта; false — письмо отправлено, ещё не подтверждена; нет поля — аккаунт создан до проверки почты
+  plan?: PlanId;         // пакет: от него зависят лимиты (одновременные генерации, кредиты в сутки)
   status: UserStatus;
   statusReason?: string;
   frozenUntil?: number;  // заморозка на срок; без даты — пока не снимут
@@ -49,11 +53,6 @@ const emailPath = (email: string) => `users-email/${createHash("sha256").update(
 export const normEmail = (e: string) => e.trim().toLowerCase();
 export const validUid = (id: unknown): id is string => typeof id === "string" && /^u[a-f0-9]{10}$/.test(id);
 export const newUid = () => `u${randomUUID().replace(/-/g, "").slice(0, 10)}`;
-export const defaultDailyLimit = () => {
-  const n = Number(process.env.USER_DAILY_CREDITS);
-  return Number.isFinite(n) && n > 0 ? n : 2000;
-};
-
 export async function hashPassword(pw: string): Promise<string> {
   const salt = randomBytes(16);
   const h = await scrypt(pw, salt, 64);
@@ -71,51 +70,59 @@ export async function checkPassword(pw: string, stored: string): Promise<boolean
 const cache = new Map<string, { at: number; rec: UserRecord | null }>();
 const TTL = 8_000;
 
-async function readAt<T>(p: string): Promise<T | null> {
-  const { items } = await listItems(p, 1);
-  const it = items.find((i) => i.pathname === p);
-  return it ? readJSON<T>(it) : null;
-}
+const norm = (rec: UserRecord): UserRecord => { rec.warnings ??= []; rec.blocked ??= []; rec.blockedTotal ??= 0; rec.ver ??= 1; return rec; };
 
 export async function getUser(id: string, fresh = false): Promise<UserRecord | null> {
   if (!validUid(id)) return null;
   const hit = cache.get(id);
   if (!fresh && hit && Date.now() - hit.at < TTL) return hit.rec;
-  const rec = await readAt<UserRecord>(userPath(id));
-  if (rec) { rec.warnings ??= []; rec.blocked ??= []; rec.blockedTotal ??= 0; rec.ver ??= 1; }
+  const got = await readPrivateAt<UserRecord>(userPath(id));
+  const rec = got ? norm(got.data) : null;
   cache.set(id, { at: Date.now(), rec });
   return rec;
 }
 
 export async function findByEmail(email: string): Promise<UserRecord | null> {
-  const idx = await readAt<{ id: string }>(emailPath(email));
-  return idx?.id ? getUser(idx.id, true) : null;
+  const idx = await readPrivateAt<{ id: string }>(emailPath(email));
+  return idx?.data.id ? getUser(idx.data.id, true) : null;
 }
 
-// Записи одного пользователя идут по очереди, чтобы параллельные правки не затирали друг друга
+// Правка карточки: читаем → меняем → пишем «только если не изменилась» (метка версии R2).
+// Копий функции на Vercel несколько, очередь в памяти одной копии от параллельных правок не спасает:
+// без этого блокировку мог затереть одновременный пересчёт баланса. Конфликт — перечитываем и повторяем
 const chains = new Map<string, Promise<unknown>>();
 export function updateUser(id: string, fn: (u: UserRecord) => UserRecord | void): Promise<UserRecord> {
   const prev = chains.get(id) ?? Promise.resolve();
   const run = prev.then(async () => {
-    const cur = await getUser(id, true);
-    if (!cur) throw Object.assign(new Error("Пользователь не найден"), { status: 404 });
-    const next = fn(cur) ?? cur;
-    await putJSON(userPath(id), next);
-    cache.set(id, { at: Date.now(), rec: next });
-    usersCache = null;
-    return next;
+    for (let attempt = 0; ; attempt++) {
+      const got = validUid(id) ? await readPrivateAt<UserRecord>(userPath(id)) : null;
+      if (!got) throw Object.assign(new Error("Пользователь не найден"), { status: 404 });
+      const cur = norm(got.data);
+      const next = fn(cur) ?? cur;
+      try {
+        // Последняя попытка — без условия: лучше записать правку, чем потерять её из-за затянувшегося конфликта
+        await putPrivateJSONIf(userPath(id), next, attempt < 6 ? got.etag : undefined);
+      } catch (e) {
+        if ((e as { conflict?: boolean }).conflict && attempt < 6) { await new Promise((r) => setTimeout(r, 40 + Math.random() * 120 * (attempt + 1))); continue; }
+        throw e;
+      }
+      cache.set(id, { at: Date.now(), rec: next });
+      usersCache = null;
+      return next;
+    }
   });
   chains.set(id, run.catch(() => {}));
+  if (chains.size > 2000) chains.delete(chains.keys().next().value!);
   return run;
 }
 
-export async function createUser(input: Omit<UserRecord, "id" | "passHash" | "status" | "ver" | "createdAt" | "warnings" | "blocked" | "blockedTotal"> & { password: string }): Promise<UserRecord> {
+export async function createUser(input: Omit<UserRecord, "id" | "passHash" | "status" | "ver" | "createdAt" | "warnings" | "blocked" | "blockedTotal"> & { password?: string }): Promise<UserRecord> {
   const { password, ...rest } = input;
   const rec: UserRecord = {
     ...rest,
     email: normEmail(rest.email),
     id: newUid(),
-    passHash: await hashPassword(password),
+    passHash: password ? await hashPassword(password) : "",
     status: "pending",
     ver: 1,
     createdAt: Date.now(),
@@ -138,7 +145,7 @@ export async function listUsers(fresh = false): Promise<UserRecord[]> {
   for (let page = 0; page < 20; page++) {
     const r = await listItems("users/", 200, cursor);
     const recs = await Promise.all(r.items.filter((i) => /^users\/u[a-f0-9]{10}\.json$/.test(i.pathname)).map((i) => readJSON<UserRecord>(i)));
-    for (const u of recs) if (u) { u.warnings ??= []; u.blocked ??= []; u.blockedTotal ??= 0; all.push(u); }
+    for (const u of recs) if (u) all.push(norm(u));
     if (!r.cursor) break;
     cursor = r.cursor;
   }

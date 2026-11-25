@@ -1,12 +1,12 @@
 import "server-only";
 import { randomUUID } from "crypto";
 import {
-  GenRequest, Kind, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, resolveRequest, buildOmniPlan, ARK_MODEL_IDS,
+  GenRequest, Kind, ProviderId, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, normalizeRequest, resolveRequest, buildOmniPlan, ARK_MODEL_IDS,
 } from "./models";
 import { describeNetError } from "./net";
-import { putFile, putJSON, putPrivateJSON, readPrivateJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, localKeyOf, StoredItem } from "./storage";
+import { putFile, putJSON, putPrivateJSON, readPrivateJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, localKeyOf, isOwnMediaUrl, OWN_MEDIA_ERROR, StoredItem } from "./storage";
 import * as hf from "./providers/higgsfield";
-import { nanoBananaGenerate, fetchAsInline, omniSubmit, omniStatus, omniDownload, omniCancel, omniDelete } from "./providers/google";
+import { nanoBananaGenerate, fetchAsInline, omniSubmit, omniStatus, omniDownload, omniCancel, omniDelete, INLINE_IMAGE_MAX, INLINE_VIDEO_MAX } from "./providers/google";
 import * as ark from "./providers/byteplus";
 import { withBase } from "./base";
 
@@ -31,7 +31,7 @@ export type JobRecord = {
   finishedAt?: number;
   userId?: string; // кто запустил (для пользователей; у владельца пусто)
   credits?: number; // сколько кредитов списано у пользователя
-  ip?: string;
+  ip?: string; // только в старых записях: адрес запуска больше не сохраняется в задаче
 };
 
 export const MOCK = process.env.MOCK_PROVIDERS === "1";
@@ -132,8 +132,7 @@ export async function ensureThumbs(ids: string[], origin: string): Promise<JobRe
   return updated;
 }
 
-export const loadInlinePublic = (url: string, origin: string) => loadInline(url, origin);
-async function loadInline(url: string, origin: string) {
+async function loadInline(url: string, origin: string, maxBytes = INLINE_IMAGE_MAX) {
   const lk = localKeyOf(url);
   if (lk) {
     const buf = await readLocalFile(lk);
@@ -143,7 +142,7 @@ async function loadInline(url: string, origin: string) {
       : ext === "mp4" ? "video/mp4" : ext === "mov" ? "video/quicktime" : ext === "webm" ? "video/webm" : "image/png";
     return { mimeType, data: buf.toString("base64") };
   }
-  return fetchAsInline(toAbsolute(url, origin));
+  return fetchAsInline(toAbsolute(url, origin), maxBytes);
 }
 
 // BytePlus принимает публичные URL или data URI; локальные файлы (режим разработки) отдаём как data URI
@@ -171,7 +170,7 @@ function mockSvg(prompt: string, seed: number, aspect = "3:4"): string {
 const SYNC_TIMEOUT_MS = 330_000;
 async function runSync(base: JobRecord, work: () => Promise<Partial<JobRecord>>): Promise<JobRecord> {
   await putJSON(pendingPath(base.id), { ...base, status: "in_progress", providerRequestId: `sync:${base.createdAt}` });
-  await markPending(base.id, `sync:${base.createdAt}`);
+  await writeMark(base.id, "s", false, { providerRequestId: `sync:${base.createdAt}` }).catch(() => {});
   let rec: JobRecord;
   try {
     rec = { ...base, ...(await work()), finishedAt: Date.now() };
@@ -186,14 +185,23 @@ async function runSync(base: JobRecord, work: () => Promise<Partial<JobRecord>>)
   return rec;
 }
 
-export async function createJob(asked: GenRequest, origin: string, who: { id?: string; uid?: string; ip?: string; souls?: string[]; credits?: number } = {}): Promise<JobRecord> {
+// Кто запускает задачу. id — заранее выданный (по нему уже списаны кредиты и занят слот),
+// active — снимок активных задач, полученный при занятии слота (чтобы не листать хранилище второй раз)
+export type JobOwner = { id?: string; uid?: string; souls?: string[]; credits?: number; active?: ActiveMark[] };
+
+export async function createJob(raw: GenRequest, origin: string, who: JobOwner = {}): Promise<JobRecord> {
+  const norm = normalizeRequest(raw);
+  if (!norm.ok) throw new hf.ProviderError(norm.error, 400);
+  const asked = norm.req;
   const err = validateRequest(asked);
   if (err) throw new hf.ProviderError(err, 400);
   // Пользователь может брать только своих персонажей Soul ID
-  const soulId = asked.params?.custom_reference_id;
-  if (who.uid && typeof soulId === "string" && soulId && !(who.souls ?? []).includes(soulId)) {
+  const soulId = asked.params.custom_reference_id;
+  if (who.uid && soulId && !(who.souls ?? []).includes(String(soulId))) {
     throw new hf.ProviderError("Этот Soul ID вам недоступен — создайте своего персонажа", 403);
   }
+  // Рефы пользователя — только файлы из хранилища студии (см. isOwnMediaUrl)
+  if (who.uid) assertOwnMedia(Object.values(asked.inputs).flat());
   // В записи задачи остаётся режим, выбранный в интерфейсе; провайдеру уходит фактический
   const req = resolveRequest(asked);
   const model = getModel(req.modelId)!;
@@ -201,14 +209,16 @@ export async function createJob(asked: GenRequest, origin: string, who: { id?: s
   const id = who.id && jobScope(who.id) === (who.uid ?? "") && parseJobId(who.id)?.kind === model.kind ? who.id : newJobId(model.kind, who.uid ?? "");
   const base: JobRecord = {
     id, kind: model.kind, modelId: model.id, modeId: mode.id,
-    prompt: (asked.prompt ?? "").trim(), params: asked.params ?? {}, inputs: asked.inputs ?? {},
+    prompt: asked.prompt.trim(), params: asked.params, inputs: asked.inputs,
     cost: estimateCost(asked), provider: MOCK ? "mock" : model.provider,
     status: "queued", outputs: [], createdAt: Date.now(),
-    ...(who.uid ? { userId: who.uid } : {}), ...(who.ip ? { ip: who.ip } : {}), ...(who.credits ? { credits: who.credits } : {}),
+    ...(who.uid ? { userId: who.uid } : {}), ...(who.credits ? { credits: who.credits } : {}),
   };
+  const lane = laneOf(model);
 
-  if (MOCK) {
-    if (model.kind === "image") {
+  // ---------- Синхронные генерации (картинки Google и BytePlus): результат приходит в этом же запросе ----------
+  if (lane === "s") {
+    if (MOCK) {
       return runSync(base, async () => {
         await new Promise((r) => setTimeout(r, 4000)); // имитация времени генерации
         // Слово mock-block в промпте имитирует отказ модерации (проверка учёта нарушений)
@@ -222,104 +232,39 @@ export async function createJob(asked: GenRequest, origin: string, who: { id?: s
         return { status: "completed", outputs };
       });
     }
-    const rec = { ...base, providerRequestId: `mock:${Date.now()}` };
-    await putJSON(pendingPath(id), rec);
-    await markPending(id, rec.providerRequestId!);
-    return rec;
-  }
-
-  if (model.provider === "google" && model.kind === "video") {
-    const plan = buildOmniPlan(req);
-    const media = await Promise.all(plan.media.map(async (m) => ({ kind: m.kind, ...(await loadInline(m.url, origin)) })));
-    const body: Record<string, unknown> = {
-      input: media.length
-        ? [...media.map((m) => ({ type: m.kind, data: m.data, mime_type: m.mimeType })), ...(plan.text ? [{ type: "text", text: plan.text }] : [])]
-        : plan.text,
-      response_format: plan.responseFormat,
-    };
-    if (plan.task) body.generation_config = { video_config: { task: plan.task } };
-    const iid = await omniSubmit(body);
-    const rec: JobRecord = { ...base, providerRequestId: `omni:${iid}` };
-    await putJSON(pendingPath(id), rec);
-    await markPending(id, rec.providerRequestId!);
-    return rec;
-  }
-
-  if (model.provider === "google") {
-    return runSync(base, async () => {
-      const refs = await Promise.all((req.inputs.refs ?? []).filter(Boolean).map((u) => loadInline(u, origin)));
-      const count = Math.min(4, Math.max(1, Number(req.params.count ?? 1)));
-      const results = await Promise.allSettled(
-        Array.from({ length: count }, () => nanoBananaGenerate({
-          prompt: base.prompt, refs,
-          aspectRatio: String(req.params.aspect_ratio ?? "auto"),
-          imageSize: String(req.params.image_size ?? "2K"),
-          thinking: req.params.thinking ? String(req.params.thinking) : undefined,
-        })),
-      );
-      const images = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
-      if (!images.length) {
-        const first = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
-        throw first?.reason ?? new Error("Нет результата");
-      }
-      const outputs: JobOutput[] = [];
-      for (let i = 0; i < images.length; i++) {
-        const img = images[i];
-        const url = await putFile(`out/${id}/${i}.${extFrom(img.mimeType, "", "image")}`, img.data, img.mimeType);
-        outputs.push({ url, type: "image", thumb: await makeThumb(id, i, img.data) });
-      }
-      // Платим только за реально полученные картинки
-      return { status: "completed", outputs, cost: Math.round((base.cost / count) * images.length * 10000) / 10000 };
-    });
-  }
-
-  if (model.provider === "byteplus") {
-    const arkModel = ark.arkModelId(model.id, ARK_MODEL_IDS[model.id]);
-    const conv: Record<string, string[]> = {};
-    const { arkInputFor } = await import("./precheck");
-    for (const [k, v] of Object.entries(req.inputs ?? {})) {
-      conv[k] = await Promise.all((v ?? []).filter(Boolean).map(async (u) =>
-        (model.kind === "video" ? await arkInputFor(u, who.uid ?? "") : null) ?? toProviderUrl(u, origin)));
-    }
-    if (model.kind === "video") {
-      let taskId: string;
-      let cost = base.cost;
-      const send = async (inputs: Record<string, string[]>) => {
-        const body = buildArkVideoBody({ ...req, inputs }, arkModel);
-        try {
-          return await ark.seedanceSubmit(body);
-        } catch (e) {
-          if (!SD_EDIT_ERR.test((e as Error).message)) throw e;
-          // Правка видео: результат будет длиной с исходник. Пользователю не даём запустить дороже, чем он оплатил
-          const asked = Number(req.params?.duration ?? 5);
-          const len = await longestVideoRef(req, origin);
-          const need = len ? Math.ceil(len) : null;
-          if (who.uid && (!need || need > asked)) {
-            throw new hf.ProviderError(need
-              ? `Seedance правит видео целиком, результат будет длиной с исходник — ${String(len).replace(".", ",")} с. Поставьте длительность ${need} с и запустите снова`
-              : "Seedance правит видео целиком, результат будет длиной с исходник. Поставьте длительность, равную длине видео-референса (с округлением вверх)", 400);
-          }
-          if (need) cost = Math.round((base.cost / Math.max(1, asked)) * need * 10000) / 10000;
-          return await ark.seedanceSubmit({ ...body, duration: -1, ratio: "adaptive" });
+    if (model.provider === "google") {
+      return runSync(base, async () => {
+        const refs = await Promise.all((req.inputs.refs ?? []).filter(Boolean).map((u) => loadInline(u, origin)));
+        const count = Math.min(4, Math.max(1, Number(req.params.count ?? 1) || 1));
+        const results = await Promise.allSettled(
+          Array.from({ length: count }, () => nanoBananaGenerate({
+            prompt: base.prompt, refs,
+            aspectRatio: String(req.params.aspect_ratio ?? "auto"),
+            imageSize: String(req.params.image_size ?? "2K"),
+            thinking: req.params.thinking ? String(req.params.thinking) : undefined,
+          })),
+        );
+        const images = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+        if (!images.length) {
+          const first = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+          throw first?.reason ?? new Error("Нет результата");
         }
-      };
-      try {
-        taskId = await send(conv);
-      } catch (e) {
-        // Ассет успел исчезнуть из библиотеки BytePlus — повторяем с обычными ссылками (Seedance проверит рефы сам)
-        if (!/asset[^.]*not found/i.test((e as Error).message)) throw e;
-        const plain: Record<string, string[]> = {};
-        for (const [k, v] of Object.entries(req.inputs ?? {})) plain[k] = await Promise.all((v ?? []).filter(Boolean).map((u) => toProviderUrl(u, origin)));
-        taskId = await send(plain);
-      }
-      const rec: JobRecord = { ...base, cost, providerRequestId: `ark:${taskId}` };
-      await putJSON(pendingPath(id), rec);
-    await markPending(id, rec.providerRequestId!);
-      return rec;
+        const outputs: JobOutput[] = [];
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          const url = await putFile(`out/${id}/${i}.${extFrom(img.mimeType, "", "image")}`, img.data, img.mimeType);
+          outputs.push({ url, type: "image", thumb: await makeThumb(id, i, img.data) });
+        }
+        // Платим только за реально полученные картинки
+        return { status: "completed", outputs, cost: Math.round((base.cost / count) * images.length * 10000) / 10000 };
+      });
     }
+    // Seedream (BytePlus)
+    const arkModel = ark.arkModelId(model.id, ARK_MODEL_IDS[model.id]);
+    const refs = await Promise.all((req.inputs.refs ?? []).filter(Boolean).map((u) => toProviderUrl(u, origin)));
     return runSync(base, async () => {
-      const count = Math.min(4, Math.max(1, Number(req.params.count ?? 1)));
-      const body = buildArkImageBody(req, arkModel, conv.refs ?? []);
+      const count = Math.min(4, Math.max(1, Number(req.params.count ?? 1) || 1));
+      const body = buildArkImageBody(req, arkModel, refs);
       const results = await Promise.allSettled(Array.from({ length: count }, () => ark.seedreamGenerate(body)));
       const urls = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
       if (!urls.length) {
@@ -332,15 +277,99 @@ export async function createJob(asked: GenRequest, origin: string, who: { id?: s
     });
   }
 
-  // Higgsfield: асинхронно, сохраняем задачу и отдаём клиенту для опроса
+  // ---------- Асинхронные генерации (всё через Higgsfield, видео BytePlus и Google) ----------
+  // У провайдера ограничено число одновременных задач на аккаунт. Свободного места нет (или кто-то уже ждёт) —
+  // задача встаёт в очередь студии и стартует сама, когда слот освободится (см. startQueued)
+  const all = who.active ?? (await listActive().catch(() => [] as ActiveMark[]));
+  const now = Date.now();
+  const running = all.filter((m) => m.lane === lane && !m.queued && m.id !== id && freshMark(m, now)).length;
+  const waiting = all.some((m) => m.lane === lane && m.queued);
+  if (running >= laneCap(lane) || waiting) {
+    const rec: JobRecord = { ...base, providerRequestId: `wait:${base.createdAt}` };
+    await putJSON(pendingPath(id), rec);
+    await writeMark(id, lane, true, { providerRequestId: rec.providerRequestId!, origin });
+    await dropMarks(id, { keepQueued: true });
+    return rec;
+  }
+  const started = await submitAsync(base, req, origin);
+  const rec: JobRecord = { ...base, ...started };
+  await putJSON(pendingPath(id), rec);
+  await writeMark(id, lane, false, { providerRequestId: rec.providerRequestId! }).catch(() => {});
+  return rec;
+}
+
+function assertOwnMedia(urls: string[]) {
+  for (const u of urls) {
+    if (isOwnMediaUrl(u) || (MOCK && u === withBase("/mock.mp4"))) continue;
+    throw new hf.ProviderError(OWN_MEDIA_ERROR, 400);
+  }
+}
+
+// Отправка задачи провайдеру. Возвращает, чем дополнить запись: id запроса у провайдера, статус, уточнённую стоимость
+async function submitAsync(base: JobRecord, req: GenRequest, origin: string): Promise<Partial<JobRecord> & { providerRequestId: string }> {
+  const model = getModel(req.modelId)!;
+  const uid = base.userId ?? "";
+  if (MOCK) return { providerRequestId: `mock:${Date.now()}` };
+
+  if (model.provider === "google") {
+    const plan = buildOmniPlan(req);
+    const media = await Promise.all(plan.media.map(async (m) => ({ kind: m.kind, ...(await loadInline(m.url, origin, m.kind === "video" ? INLINE_VIDEO_MAX : INLINE_IMAGE_MAX)) })));
+    const body: Record<string, unknown> = {
+      input: media.length
+        ? [...media.map((m) => ({ type: m.kind, data: m.data, mime_type: m.mimeType })), ...(plan.text ? [{ type: "text", text: plan.text }] : [])]
+        : plan.text,
+      response_format: plan.responseFormat,
+    };
+    if (plan.task) body.generation_config = { video_config: { task: plan.task } };
+    return { providerRequestId: `omni:${await omniSubmit(body)}` };
+  }
+
+  if (model.provider === "byteplus") {
+    const arkModel = ark.arkModelId(model.id, ARK_MODEL_IDS[model.id]);
+    const conv: Record<string, string[]> = {};
+    const { arkInputFor } = await import("./precheck");
+    for (const [k, v] of Object.entries(req.inputs ?? {})) {
+      conv[k] = await Promise.all((v ?? []).filter(Boolean).map(async (u) => (await arkInputFor(u, uid)) ?? toProviderUrl(u, origin)));
+    }
+    let cost = base.cost;
+    const send = async (inputs: Record<string, string[]>) => {
+      const body = buildArkVideoBody({ ...req, inputs }, arkModel);
+      try {
+        return await ark.seedanceSubmit(body);
+      } catch (e) {
+        if (!SD_EDIT_ERR.test((e as Error).message)) throw e;
+        // Правка видео: результат будет длиной с исходник. Пользователю не даём запустить дороже, чем он оплатил
+        const asked = Number(req.params?.duration ?? 5);
+        const len = await longestVideoRef(req, origin);
+        const need = len ? Math.ceil(len) : null;
+        if (uid && (!need || need > asked)) {
+          throw new hf.ProviderError(need
+            ? `Seedance правит видео целиком, результат будет длиной с исходник — ${String(len).replace(".", ",")} с. Поставьте длительность ${need} с и запустите снова`
+            : "Seedance правит видео целиком, результат будет длиной с исходник. Поставьте длительность, равную длине видео-референса (с округлением вверх)", 400);
+        }
+        if (need) cost = Math.round((base.cost / Math.max(1, asked)) * need * 10000) / 10000;
+        return await ark.seedanceSubmit({ ...body, duration: -1, ratio: "adaptive" });
+      }
+    };
+    let taskId: string;
+    try {
+      taskId = await send(conv);
+    } catch (e) {
+      // Ассет успел исчезнуть из библиотеки BytePlus — повторяем с обычными ссылками (Seedance проверит рефы сам)
+      if (!/asset[^.]*not found/i.test((e as Error).message)) throw e;
+      const plain: Record<string, string[]> = {};
+      for (const [k, v] of Object.entries(req.inputs ?? {})) plain[k] = await Promise.all((v ?? []).filter(Boolean).map((u) => toProviderUrl(u, origin)));
+      taskId = await send(plain);
+    }
+    return { providerRequestId: `ark:${taskId}`, cost };
+  }
+
+  // Higgsfield: ключ идемпотентности — id задачи, повторная отправка не создаёт вторую генерацию
   const absInputs: Record<string, string[]> = {};
   for (const [k, v] of Object.entries(req.inputs ?? {})) absInputs[k] = (v ?? []).filter(Boolean).map((u) => toAbsolute(u, origin));
   const { endpoint, body } = buildHiggsfieldBody({ ...req, inputs: absInputs });
-  const sub = await hf.submit(endpoint, body, id).catch((e) => { throw SD_EDIT_ERR.test((e as Error).message) ? new hf.ProviderError(HF_EDIT_TEXT, 400) : e; });
-  const rec: JobRecord = { ...base, providerRequestId: sub.request_id, status: (sub.status as JobStatus) || "queued" };
-  await putJSON(pendingPath(id), rec);
-    await markPending(id, rec.providerRequestId!);
-  return rec;
+  const sub = await hf.submit(endpoint, body, base.id).catch((e) => { throw SD_EDIT_ERR.test((e as Error).message) ? new hf.ProviderError(HF_EDIT_TEXT, 400) : e; });
+  return { providerRequestId: sub.request_id, status: (sub.status as JobStatus) || "queued" };
 }
 
 // Seedance сам решает по промпту, что это правка видео, и тогда требует duration = -1 и ratio = adaptive:
@@ -381,46 +410,220 @@ async function finalize(id: string, patch: Partial<JobRecord>): Promise<JobRecor
   return done;
 }
 
-// Срабатывания модерации провайдеров у пользователей учитываем (lib/moderation)
-// Неудачная, отменённая или заблокированная генерация — кредиты возвращаются пользователю
-// Метки незавершённых задач: по ним сервер сам доводит задачи, даже если вкладку закрыли
-const markPath = (id: string) => `pending-index/${id}.json`;
-async function markPending(id: string, providerRequestId: string) {
-  await putPrivateJSON(markPath(id), { id, providerRequestId, at: Date.now() }).catch(() => {});
+// ---------- Активные задачи: слоты пользователя, потолок провайдера, очередь ----------
+// На каждую незавершённую задачу в хранилище лежит метка pending-index/<id>~<полоса>~<r|q>.json.
+// Имя метки говорит всё нужное, поэтому один листинг папки даёт полную картину без чтения файлов:
+//   — чья задача и какого вида (из id) → сколько генераций пользователь ведёт одновременно;
+//   — полоса: s — синхронная (без потолка), h — Higgsfield, b — видео BytePlus, g — видео Google, m — тестовый режим;
+//   — r — занимает слот провайдера (или вот-вот займёт), q — ждёт в очереди студии.
+// По этим же меткам сервер сам доводит задачи, даже если вкладку закрыли (sweepPending).
+export type Lane = "s" | "g" | "h" | "b" | "m";
+export type ActiveMark = { id: string; kind: Kind; uid: string; lane: Lane | "?"; queued: boolean; at: number; item: StoredItem };
+
+export function laneOf(model: { provider: ProviderId; kind: Kind }): Lane {
+  if (MOCK) return model.kind === "image" ? "s" : "m";
+  if (model.provider === "higgsfield") return "h";
+  if (model.kind === "image") return "s";
+  return model.provider === "google" ? "g" : "b";
 }
-async function dropPendingMark(id: string) {
-  const p = markPath(id);
-  const { items } = await listItems(p, 1).catch(() => ({ items: [] as StoredItem[] }));
-  const it = items.find((i) => i.pathname === p);
-  if (it) await deleteItems([it]).catch(() => {});
+// Сколько задач студия держит у провайдера одновременно (сверх этого — очередь). Меняется переменными
+// CAP_HIGGSFIELD, CAP_BYTEPLUS, CAP_GOOGLE: ставьте чуть ниже лимита одновременных задач в консоли провайдера
+const LANE_ENV: Record<string, string> = { g: "GOOGLE", h: "HIGGSFIELD", b: "BYTEPLUS", m: "MOCK" };
+export function laneCap(lane: Lane | "?"): number {
+  if (!LANE_ENV[lane]) return Infinity;
+  const n = Number(process.env[`CAP_${LANE_ENV[lane]}`]);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 8;
+}
+
+const MARK_RE = /^pending-index\/((?:image|video)_\d{13}_[a-f0-9]{8}(?:_u[a-f0-9]{10})?)(?:~([sghbm])~([rq]))?\.json$/;
+const markPath = (id: string, lane: Lane, queued: boolean) => `pending-index/${id}~${lane}~${queued ? "q" : "r"}.json`;
+const createdAtOf = (id: string) => 9_999_999_999_999 - Number(id.split("_")[1]);
+// Метка без движения дольше этого срока слот не держит (задача зависла или метку не убрали — её подберёт sweepPending)
+const STALE_MS: Record<Kind, number> = { image: 20 * 60_000, video: 3 * 3_600_000 };
+const freshMark = (m: ActiveMark, now = Date.now()) => m.queued || now - m.at < STALE_MS[m.kind];
+
+export async function listActive(): Promise<ActiveMark[]> {
+  const out: ActiveMark[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 3; page++) {
+    const r = await listItems("pending-index/", 1000, cursor);
+    for (const it of r.items) {
+      const m = MARK_RE.exec(it.pathname);
+      const p = m ? parseJobId(m[1]) : null;
+      if (!m || !p) continue;
+      out.push({ id: m[1], kind: p.kind, uid: p.uid, lane: (m[2] as Lane | undefined) ?? "?", queued: m[3] === "q", at: createdAtOf(m[1]), item: it });
+    }
+    if (!r.cursor) break;
+    cursor = r.cursor;
+  }
+  return out;
+}
+
+async function writeMark(id: string, lane: Lane, queued: boolean, body: { providerRequestId: string; origin?: string }) {
+  await putPrivateJSON(markPath(id, lane, queued), { id, at: Date.now(), ...body });
+}
+// Убрать метки задачи (старого и нового вида). keepQueued — оставить метку очереди
+async function dropMarks(id: string, opts: { keepQueued?: boolean; onlyQueued?: boolean } = {}) {
+  const { items } = await listItems(`pending-index/${id}`, 10).catch(() => ({ items: [] as StoredItem[] }));
+  const mine = items.filter((i) => {
+    const m = MARK_RE.exec(i.pathname);
+    if (!m || m[1] !== id) return false;
+    if (opts.keepQueued && m[3] === "q") return false;
+    if (opts.onlyQueued && m[3] !== "q") return false;
+    return true;
+  });
+  if (mine.length) await deleteItems(mine).catch(() => {});
+}
+const dropPendingMark = (id: string) => dropMarks(id);
+export const releaseSlot = dropPendingMark;
+
+const genWord = (n: number, kind: Kind) => {
+  const a = n % 100, b = n % 10;
+  const form = a > 10 && a < 20 ? 2 : b === 1 ? 0 : b >= 2 && b <= 4 ? 1 : 2;
+  return (kind === "video" ? ["видеогенерации", "видеогенераций", "видеогенераций"] : ["генерации картинок", "генераций картинок", "генераций картинок"])[form];
+};
+
+// Занять слот до списания кредитов: сначала пишем метку, потом считаем чужие. При гонке двух запросов
+// каждый увидит метку другого, и лишний откажется сам (в худшем случае откажут оба) — лимит не превышается никогда.
+// limit — сколько генераций этого вида пользователь может вести одновременно (по пакету); у владельца лимита нет
+export async function reserveSlot(id: string, lane: Lane, limit: number, planName: string): Promise<ActiveMark[]> {
+  const p = parseJobId(id);
+  if (!p) throw new hf.ProviderError("Некорректный id", 400);
+  await writeMark(id, lane, false, { providerRequestId: "" });
+  let all: ActiveMark[];
+  try { all = await listActive(); } catch (e) { await dropPendingMark(id); throw e; }
+  if (!p.uid) return all;
+  const now = Date.now();
+  const others = all.filter((m) => m.uid === p.uid && m.kind === p.kind && m.id !== id && freshMark(m, now)).length;
+  if (others >= limit) {
+    await dropPendingMark(id);
+    throw new hf.ProviderError(`Лимит пакета ${planName}: не больше ${limit} ${genWord(limit, p.kind)} одновременно, и все слоты заняты. Дождитесь завершения или отмените одну из генераций`, 429);
+  }
+  return all;
+}
+
+// Кому из очереди полосы сейчас можно стартовать. Свободные слоты раздаются по кругу:
+// первым идёт тот, у кого меньше задач уже в работе, при равенстве — кто раньше встал в очередь
+function startable(all: ActiveMark[], lane: Lane): Set<string> {
+  const now = Date.now();
+  const running = all.filter((m) => m.lane === lane && !m.queued && freshMark(m, now));
+  const free = laneCap(lane) - running.length;
+  if (free <= 0) return new Set();
+  const runBy = new Map<string, number>();
+  for (const m of running) runBy.set(m.uid, (runBy.get(m.uid) ?? 0) + 1);
+  const queued = all.filter((m) => m.lane === lane && m.queued).sort((a, b) => a.at - b.at || (a.id < b.id ? -1 : 1));
+  const seen = new Map<string, number>();
+  const ranked = queued.map((m) => {
+    const i = seen.get(m.uid) ?? 0;
+    seen.set(m.uid, i + 1);
+    return { m, key: (runBy.get(m.uid) ?? 0) + i };
+  }).sort((a, b) => a.key - b.key || a.m.at - b.m.at);
+  return new Set(ranked.slice(0, free).map((x) => x.m.id));
+}
+
+// Замок на запуск задачи из очереди: её одновременно могут попробовать стартовать вкладка и фоновая доводка,
+// а второй запуск — это вторая оплата провайдеру. Пишем свою отметку и смотрим папку: есть чужая — отступаем
+const LOCK_TTL = 180_000;
+async function acquireStartLock(id: string): Promise<StoredItem | null> {
+  const prefix = `locks/start/${id}/`;
+  const name = `${prefix}${Date.now()}-${randomUUID().slice(0, 8)}`;
+  await putFile(name, "", "text/plain");
+  const { items } = await listItems(prefix, 50);
+  const mine = items.find((i) => i.pathname === name);
+  const others = items.filter((i) => i.pathname !== name);
+  const stale = others.filter((i) => Date.now() - Number(i.pathname.slice(prefix.length).split("-")[0]) >= LOCK_TTL);
+  if (stale.length) await deleteItems(stale).catch(() => {});
+  if (!mine || others.length > stale.length) {
+    if (mine) await deleteItems([mine]).catch(() => {});
+    return null;
+  }
+  return mine;
+}
+
+type PollResult = Partial<JobRecord> & { id: string; status: JobStatus };
+
+// Попытка запустить задачу из очереди. Не её очередь или нет слота — остаётся «в очереди»
+export async function startQueued(id: string): Promise<PollResult> {
+  const files = await findJobFiles(id);
+  if (files.done) return (await readJSON<JobRecord>(files.done)) ?? { id, status: "failed", error: "Задача не найдена" };
+  if (!files.pending) { await dropPendingMark(id); return { id, status: "failed", error: "Задача не найдена" }; }
+  const rec = await readJSON<JobRecord>(files.pending);
+  if (!rec) return { id, status: "queued" };
+  if (!rec.providerRequestId?.startsWith("wait:")) return rec; // уже запущена
+  const waitId = rec.providerRequestId;
+  const model = getModel(rec.modelId);
+  if (!model) return (await finalize(id, { status: "failed", error: "Модель больше недоступна" })) ?? { id, status: "failed" };
+  const lane = laneOf(model);
+  const all = await listActive();
+  if (!startable(all, lane).has(id)) return { id, status: "queued", providerRequestId: waitId };
+  const lock = await acquireStartLock(id);
+  if (!lock) return { id, status: "queued", providerRequestId: waitId };
+  try {
+    // Под замком перечитываем запись: её мог успеть запустить (или отменить) другой запрос
+    const f2 = await findJobFiles(id);
+    if (f2.done) return (await readJSON<JobRecord>(f2.done)) ?? { id, status: "failed" };
+    const cur = f2.pending ? await readJSON<JobRecord>(f2.pending) : null;
+    if (!cur) return { id, status: "queued", providerRequestId: waitId };
+    if (!cur.providerRequestId?.startsWith("wait:")) return cur;
+    const mark = all.find((m) => m.id === id && m.queued);
+    const body = mark ? await readPrivateJSON<{ origin?: string }>(mark.item) : null;
+    const asked: GenRequest = { modelId: cur.modelId, modeId: cur.modeId, prompt: cur.prompt, params: cur.params, inputs: cur.inputs };
+    let started: Awaited<ReturnType<typeof submitAsync>>;
+    try {
+      started = await submitAsync(cur, resolveRequest(asked), body?.origin || "https://metaframe.ltd");
+    } catch (e) {
+      const msg = describeNetError(e, "провайдером").message || "Не удалось запустить генерацию";
+      return (await finalize(id, { status: "failed", outputs: [], error: msg })) ?? { id, status: "failed", error: msg };
+    }
+    const next: JobRecord = { ...cur, ...started };
+    await putJSON(pendingPath(id), next);
+    await writeMark(id, lane, false, { providerRequestId: next.providerRequestId! });
+    await dropMarks(id, { onlyQueued: true });
+    return next;
+  } finally {
+    await deleteItems([lock]).catch(() => {});
+  }
+}
+
+// Отмена задачи, которая ещё ждёт в очереди: провайдеру она не уходила, кредиты возвращаются
+export async function cancelQueued(id: string): Promise<void> {
+  await finalize(id, { status: "canceled", outputs: [], error: "Отменено" });
 }
 
 let lastSweep = 0;
-// Фоновая доводка: задачи старше 2 минут без живого опроса из браузера опрашиваем сами
-// (возврат кредитов за неудачные и сохранение результата не зависят от того, открыта ли вкладка)
+// Фоновая доводка: задачи из очереди запускаем, как только есть слот; задачи старше 2 минут без живого опроса
+// из браузера опрашиваем сами (возврат кредитов за неудачные и сохранение результата не зависят от вкладки).
+// Запускается и с запросов сайта, и по будильнику воркера хранилища (/api/cron/sweep)
 export async function sweepPending(opts: { force?: boolean; budgetMs?: number } = {}): Promise<{ checked: number; finished: number }> {
   const now = Date.now();
   if (!opts.force && now - lastSweep < (Number(process.env.SWEEP_EVERY_MS) || 60_000)) return { checked: 0, finished: 0 };
   lastSweep = now;
   const deadline = now + (opts.budgetMs ?? 20_000);
-  const { items } = await listItems("pending-index/", 200);
+  const minAge = Number(process.env.SWEEP_MIN_AGE_MS) || 120_000;
+  const all = await listActive();
   let checked = 0, finished = 0;
-  const queue = [...items];
+  // Сначала очередь (по порядку постановки), потом остальные
+  const queue = [...all.filter((m) => m.queued).sort((a, b) => a.at - b.at), ...all.filter((m) => !m.queued)];
   async function worker() {
-    for (let it = queue.shift(); it && Date.now() < deadline; it = queue.shift()) {
-      const m = await readPrivateJSON<{ id: string; providerRequestId: string; at: number }>(it);
-      if (!m?.id || !parseJobId(m.id)) { await deleteItems([it]).catch(() => {}); continue; }
+    for (let m = queue.shift(); m && Date.now() < deadline; m = queue.shift()) {
       const age = Date.now() - m.at;
-      if (age < (Number(process.env.SWEEP_MIN_AGE_MS) || 120_000)) continue;
+      if (!m.queued && age < minAge) continue;
       checked++;
       try {
+        if (m.queued) {
+          const r = await startQueued(m.id);
+          if (TERMINAL.includes(r.status)) finished++;
+          continue;
+        }
         const files = await findJobFiles(m.id);
-        if (!files.pending) { await deleteItems([it]).catch(() => {}); finished++; continue; } // уже готова или удалена
-        const r = await pollJob(m.id, m.providerRequestId);
-        if (TERMINAL.includes(r.status)) { await deleteItems([it]).catch(() => {}); finished++; }
+        if (!files.pending) { await deleteItems([m.item]).catch(() => {}); finished++; continue; } // уже готова, удалена или не стартовала
+        const rec = await readJSON<JobRecord>(files.pending);
+        if (!rec?.providerRequestId) continue;
+        const r = await pollJob(m.id, rec.providerRequestId);
+        if (TERMINAL.includes(r.status)) { await deleteItems([m.item]).catch(() => {}); finished++; }
       } catch (e) {
         console.error("sweepPending:", m.id, (e as Error).message);
-        if (age > 3 * 86_400_000) await deleteItems([it]).catch(() => {});
+        if (age > 3 * 86_400_000) await deleteItems([m.item]).catch(() => {});
       }
     }
   }
@@ -465,6 +668,7 @@ export async function storedProviderId(id: string): Promise<string | null> {
 // Опрос статуса: обращаемся к хранилищу только при завершении, чтобы не тратить операции Blob
 export async function pollJob(id: string, providerRequestId: string): Promise<Partial<JobRecord> & { id: string; status: JobStatus }> {
   if (!parseJobId(id)) throw new hf.ProviderError("Некорректный id", 400);
+  if (providerRequestId.startsWith("wait:")) return startQueued(id);
   if (providerRequestId.startsWith("mock:")) {
     const started = Number(providerRequestId.slice(5));
     if (Date.now() - started < 8000) return { id, status: Date.now() - started < 3000 ? "queued" : "in_progress" };
@@ -533,7 +737,7 @@ export async function pollJob(id: string, providerRequestId: string): Promise<Pa
 }
 
 export async function cancelJob(providerRequestId: string): Promise<void> {
-  if (providerRequestId.startsWith("mock:") || providerRequestId.startsWith("sync:")) return;
+  if (providerRequestId.startsWith("mock:") || providerRequestId.startsWith("sync:") || providerRequestId.startsWith("wait:")) return;
   if (providerRequestId.startsWith("ark:")) {
     // Задачи уже нет у BytePlus — считаем отменённой, а не ошибкой
     try { await ark.seedanceCancel(providerRequestId.slice(4)); } catch (e) { if ((e as hf.ProviderError).status !== 404) throw e; }

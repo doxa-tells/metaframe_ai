@@ -12,7 +12,7 @@ export default async function StudioLayout({ children }: { children: React.React
   let me: Me = { role: "admin" };
   if (ctx.user) {
     const u = ctx.user;
-    me = { role: "user", id: u.id, name: u.name, email: u.email, status: ctx.status, statusReason: u.statusReason, frozenUntil: u.frozenUntil };
+    me = { role: "user", id: u.id, name: u.name, email: u.email, status: ctx.status, statusReason: u.statusReason, frozenUntil: u.frozenUntil, emailPending: u.emailVerified === false };
     if (ctx.status === "pending" || ctx.status === "rejected" || ctx.status === "banned") return <AccountGate me={me} />;
   }
   return <AppShell me={me}>{children}</AppShell>;
