@@ -15,7 +15,7 @@ export function creditsFor(req: GenRequest): number {
   const p = req.params ?? {};
   if (model.id === "seedance-2.5") return (SEEDANCE_PER_SEC[String(p.resolution ?? "720p")] ?? 7) * Number(p.duration ?? 5);
   if (model.id === "nano-banana-2.1" && String(p.image_size ?? "2K") === "2K") return 2 * Number(p.count ?? 1);
-  const usd = model.price(req.modeId, p);
+  const usd = model.price(req.modeId, p, req.inputs);
   if (!usd) return 0;
   const step = model.kind === "image" ? 0.25 : 1;
   return round2(Math.max(step, Math.ceil((usd * FX_SPREAD) / CREDIT_COST_CAP / step - 1e-9) * step));

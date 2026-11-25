@@ -54,7 +54,7 @@ export type ModelSpec = {
   badge?: string;
   modes: ModeSpec[];
   priceNote: string;
-  price: (modeId: string, params: Record<string, unknown>) => number; // USD
+  price: (modeId: string, params: Record<string, unknown>, inputs?: Record<string, string[]>) => number; // USD (inputs — референсы, если модель берёт за них отдельно)
 };
 
 const opts = (...v: string[]): Option[] => v.map((x) => ({ value: x, label: x }));
@@ -152,6 +152,24 @@ const seedreamPro = seedream("seedream-5.0-pro", "Seedream 5.0 Pro", "Макси
   ["1K", "1.5K", "2K"], "2K", 0.045, "BytePlus: $0.045 за изображение (+$0.003 за каждый референс после первого). Генерация до ~2 минут", "PRO");
 const seedreamFlash = seedream("seedream-5.0-flash", "Seedream 5.0 Flash", "Самый быстрый Seedream",
   ["1K", "1.5K", "2K"], "2K", 0.02, "BytePlus: около $0.02 за изображение — точную цену смотрите в консоли");
+
+// ---------- Seedream 5.5 ----------
+// Цена BytePlus: $0.02 за картинку до 2,61 Мп (это 1K и 1.5K), 2K дороже; за каждый референс — ещё $0.008.
+// Количество N — это N отдельных запросов, референсы оплачиваются в каждом
+const SR55_OUT: Record<string, number> = { "1K": 0.02, "1.5K": 0.02, "2K": 0.035 };
+const SR55_REF = 0.008;
+const seedream55: ModelSpec = (() => {
+  const m = seedream("seedream-5.5", "Seedream 5.5", "Новое поколение: точные правки, реализм, мелкий текст, прозрачный фон",
+    ["1K", "1.5K", "2K"], "2K", SR55_OUT["2K"],
+    "BytePlus: $0.02 за изображение 1K–1.5K, около $0.035 за 2K, плюс $0.008 за каждый референс", "NEW");
+  m.modes[0].params.push({ key: "background", label: "Фон", type: "select", default: "auto",
+    options: [{ value: "auto", label: "Авто" }, { value: "opaque", label: "Обычный" }, { value: "transparent", label: "Прозрачный (PNG)" }] });
+  m.price = (_m, p, inputs) => {
+    const refs = Math.min(10, (inputs?.refs ?? []).filter(Boolean).length);
+    return ((SR55_OUT[String(p.size ?? "2K")] ?? SR55_OUT["2K"]) + SR55_REF * refs) * Number(p.count ?? 1);
+  };
+  return m;
+})();
 
 // ---------- Seedance 2.5 (BytePlus ModelArk напрямую) ----------
 const SD_RES = { key: "resolution", label: "Разрешение", type: "select", default: "720p", options: opts("480p", "720p", "1080p") } as const;
@@ -442,7 +460,7 @@ export function buildOmniPlan(req: GenRequest): {
   return { media, text, responseFormat, task };
 }
 
-export const MODELS: ModelSpec[] = [nanoBanana, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, seedanceHf, kling, omni, genjutsu, genjutsuLight];
+export const MODELS: ModelSpec[] = [nanoBanana, seedream55, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, seedanceHf, kling, omni, genjutsu, genjutsuLight];
 
 export function getModel(id: string): ModelSpec | undefined {
   return MODELS.find((m) => m.id === id);
@@ -635,6 +653,7 @@ export function buildHiggsfieldBody(req: GenRequest): { endpoint: string; body: 
 // ---------- BytePlus ModelArk ----------
 export const ARK_MODEL_IDS: Record<string, string> = {
   "seedance-2.5": "dreamina-seedance-2-5-260628",
+  "seedream-5.5": "dola-seedream-5-5-261028",
   "seedream-5.0-lite": "seedream-5-0-260128",
   "seedream-5.0-pro": "dola-seedream-5-0-pro-260628",
   "seedream-5.0-flash": "dola-seedream-5-0-flash-260915",
@@ -689,13 +708,17 @@ export function buildArkImageBody(req: GenRequest, model: string, refs: string[]
     watermark: false,
   };
   if (refs.length) body.image = refs.length === 1 ? refs[0] : refs;
+  // Фон есть только у Seedream 5.5; прозрачный возможен только в PNG
+  const bg = String(p.background ?? "auto");
+  if (bg === "opaque") body.background = "opaque";
+  if (bg === "transparent") { body.background = "transparent"; body.output_format = "png"; }
   return body;
 }
 
 export function estimateCost(req: GenRequest): number {
   const model = getModel(req.modelId);
   if (!model) return 0;
-  return Math.round(model.price(req.modeId, req.params ?? {}) * 10000) / 10000;
+  return Math.round(model.price(req.modeId, req.params ?? {}, req.inputs) * 10000) / 10000;
 }
 
 export function formatUsd(n: number): string {
