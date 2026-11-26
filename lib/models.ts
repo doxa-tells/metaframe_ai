@@ -59,6 +59,7 @@ export type ModelSpec = {
   provider: ProviderId;
   description: string;
   badge?: string;
+  ownerOnly?: boolean; // провайдер ещё не открыл модель аккаунту студии: видна только владельцу (для проверки), пользователям не предлагается
   retired?: boolean; // снята с каталога: в списках не показывается и новые генерации не принимает; старые задачи открываются как раньше
   modes: ModeSpec[];
   priceNote: string;
@@ -463,6 +464,9 @@ const magi: ModelSpec = {
   vendor: "Sand AI",
   kind: "video",
   provider: "higgsfield",
+  // 26.11.2026: Higgsfield отвечает на запуск «403 model_unavailable» — модель не открыта аккаунту студии.
+  // Пока доступа нет, её видит только владелец; когда заработает — убрать эту строку
+  ownerOnly: true,
   description: "1080p со звуком, до 30 секунд, до 20 референсов. Генерации идут по одной — остальные ждут в очереди",
   badge: "NEW",
   priceNote: "Higgsfield API: $0.08/с, 1080p, звук включён",
@@ -686,6 +690,7 @@ export function normalizeRequest(raw: GenRequest): { ok: true; req: GenRequest }
   const model = typeof raw.modelId === "string" ? getModel(raw.modelId) : undefined;
   if (!model) return bad("Неизвестная модель");
   if (model.retired) return bad(`Модель «${model.name}» снята с каталога — выберите другую`);
+  if (model.ownerOnly) return bad(`Модель «${model.name}» пока недоступна — выберите другую`);
   const mode = model.modes.find((m) => m.id === raw.modeId);
   if (!mode) return bad("Неизвестный режим");
   if (raw.prompt !== undefined && raw.prompt !== null && typeof raw.prompt !== "string") return bad("Некорректный промпт");

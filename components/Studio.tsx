@@ -44,7 +44,11 @@ export function Studio({ kind }: { kind: Kind }) {
   const polling = useRef(new Set<string>());
   const alive = useRef({ cancelled: false });
 
-  const model = liveModel(form.modelId) ?? CATALOG.find((m) => m.kind === kind)!;
+  // Модели, которые провайдер ещё не открыл, видит только владелец
+  const me = useMe();
+  const offered = (m: { kind: Kind; ownerOnly?: boolean }) => m.kind === kind && (me.role === "admin" || !m.ownerOnly);
+  const saved = liveModel(form.modelId);
+  const model = saved && offered(saved) ? saved : CATALOG.find(offered)!;
   const mode = visibleMode(model, form.modeId);
   const key = k(model.id, mode.id);
   const params = useMemo(() => ({ ...defaultParams(mode), ...(form.params[key] ?? {}) }), [mode, form.params, key]);
@@ -193,7 +197,6 @@ export function Studio({ kind }: { kind: Kind }) {
   const validation = validateRequest(request);
   const cost = estimateCost(request);
   // Пользователи видят цену в кредитах, владелец — себестоимость в долларах
-  const me = useMe();
   const credits = creditsFor(request);
   const priceText = me.role === "user" ? `${formatCredits(credits)} ${creditsWord(credits)}` : undefined;
   const KEY_ENV = { google: "GEMINI_API_KEY", byteplus: "ARK_API_KEY", higgsfield: "HF_API_KEY" } as const;
@@ -271,7 +274,7 @@ export function Studio({ kind }: { kind: Kind }) {
     try { await cancelJob(job); } catch (e) { setError((e as Error).message); }
   }
 
-  const models = CATALOG.filter((m) => m.kind === kind);
+  const models = CATALOG.filter(offered);
   const shared = {
     models, model, mode, prompt: form.prompt, params, inputs, cost, priceText, validation, error, missingKey,
     onModel: setModel,

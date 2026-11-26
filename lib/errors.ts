@@ -10,6 +10,9 @@ export function humanizeError(status: string, raw?: string | null): HumanError {
   if (status === "canceled") return { ...base, kind: "canceled", title: "Отменено", text: "Генерация остановлена" };
   if (status === "nsfw") return { ...base, kind: "censor", title: "Цензура", text: "Провайдер скрыл результат модерацией", hint: IP_HINT };
 
+  // Провайдер не открыл модель для аккаунта студии: это не ошибка ключа (хотя код ответа тот же — 403)
+  if (has(/model_unavailable|ModelNotOpen|не активирована/i))
+    return { ...base, kind: "unavailable", title: "Модель недоступна", text: "Провайдер не открыл эту модель для аккаунта студии", hint: "Ключ и настройки в порядке — доступ к модели включается на стороне провайдера. Кредиты не списаны" };
   if (has(/Seedance правит видео целиком/))
     return { ...base, kind: "params", title: "Длительность", text: e.slice(0, 220) };
   if (has(/Seedance понял промпт как правку видео|interpreted as video editing|TaskTypeConstraint/i))

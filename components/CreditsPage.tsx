@@ -18,7 +18,6 @@ const SAMPLES: { label: string; modelId: string; modeId: string; params: Record<
   { label: "Видео Seedance 2.5, 5 с, 720p", modelId: "seedance-2.5", modeId: "image", params: { resolution: "720p", duration: 5 } },
   { label: "Видео Seedance 2.5 Flash, 5 с, 720p", modelId: "seedance-2.5-flash", modeId: "image", params: { resolution: "720p", duration: 5 } },
   { label: "Видео Seedance 2.5, 5 с, 1080p", modelId: "seedance-2.5", modeId: "image", params: { resolution: "1080p", duration: 5 } },
-  { label: "Видео MAGI-2, 5 с, 1080p", modelId: "magi-2", modeId: "image", params: { duration: 5 } },
   { label: "Видео Kling 4.0, 5 с, 1080p", modelId: "kling-4.0", modeId: "image", params: { resolution: "1080p", duration: 5 } },
   { label: "Видео Gemini Omni Flash, 8 с, 720p", modelId: "gemini-omni-flash", modeId: "text", params: { resolution: "720p", duration: 8 } },
 ];
