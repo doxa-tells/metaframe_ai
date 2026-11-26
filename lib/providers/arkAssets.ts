@@ -141,13 +141,18 @@ export async function assetStatus(id: string): Promise<AssetState> {
 // Лимит общий на аккаунт, поэтому чистим самые старые из всех наших групп
 export async function pruneOldest(count: number): Promise<number> {
   const r = await call("ListAssets", { Filter: { GroupType: "AIGC" }, MaxResults: 100, SortBy: "CreateTime", SortOrder: "Asc", ProjectName: ARK_PROJECT() });
-  // Свежие ассеты (моложе 6 часов) не трогаем — ими могут пользоваться рефы, которые сейчас в работе
-  const fresh = (x: { CreateTime?: unknown }) => {
+  // Свежие ассеты (моложе 6 часов) не трогаем — ими могут пользоваться рефы, которые сейчас в работе.
+  // Если старше 6 часов ничего нет (всю библиотеку заполнили за один сеанс), берём те, что старше часа:
+  // иначе новые рефы не проверить вообще. Удалённый реф в генерацию уйдёт обычной ссылкой
+  const ageMs = (x: { CreateTime?: unknown }) => {
     const t = typeof x.CreateTime === "number" ? (x.CreateTime < 1e12 ? x.CreateTime * 1000 : x.CreateTime) : Date.parse(String(x.CreateTime ?? ""));
-    return Number.isFinite(t) && Date.now() - t < 6 * 3_600_000;
+    return Number.isFinite(t) ? Date.now() - t : Infinity;
   };
-  const items = ((r.Items ?? []) as { Id?: string; CreateTime?: unknown }[]).filter((x) => x.Id && !fresh(x)).slice(0, count);
+  const all = ((r.Items ?? []) as { Id?: string; CreateTime?: unknown }[]).filter((x) => x.Id);
+  let items = all.filter((x) => ageMs(x) >= 6 * 3_600_000).slice(0, count);
+  if (!items.length) items = all.filter((x) => ageMs(x) >= 3_600_000).slice(0, count);
   let n = 0;
   for (const it of items) { try { await call("DeleteAsset", { Id: it.Id, ProjectName: ARK_PROJECT() }); n++; } catch { /* дальше */ } }
+  if (n) recent = null; // список статусов устарел
   return n;
 }

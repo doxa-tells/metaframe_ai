@@ -34,6 +34,9 @@ type Props = {
 
 const KIND_ICON: Record<string, string> = { image: "image", video: "video", audio: "sound" };
 
+// Сколько ждём предпроверку одного референса у BytePlus, прежде чем пропустить её
+const CHECK_WAIT_MS = 120_000;
+
 export function VideoPanel(p: Props) {
   const { sendToChat } = useApp();
   const up = useUploader(p.mode, p.inputs, p.onInput);
@@ -52,6 +55,8 @@ export function VideoPanel(p: Props) {
   const [checkInfo, setCheckInfo] = useState<string | null>(null);
   const checksRef = useRef(checks);
   checksRef.current = checks;
+  // Когда начали проверять каждый реф: дольше CHECK_WAIT_MS не ждём, чтобы проверка не блокировала запуск бесконечно
+  const checkStart = useRef<Record<string, number>>({});
   const inputsRef = useRef(p.inputs);
   inputsRef.current = p.inputs;
   const onInputRef = useRef(p.onInput);
@@ -64,7 +69,13 @@ export function VideoPanel(p: Props) {
     for (const it of toCheck) {
       if (checksRef.current[it.url]) continue;
       setChecks((c) => ({ ...c, [it.url]: "checking" }));
+      checkStart.current[it.url] ??= Date.now();
       precheckApi(p.model.id, it.url, it.kind).then((r) => {
+        if (r.retryAfter && Date.now() - checkStart.current[it.url] > CHECK_WAIT_MS) {
+          setChecks((c) => ({ ...c, [it.url]: "skip" }));
+          setCheckInfo("BytePlus долго не отвечает на проверку референса — запускать можно: Seedance проверит его сам при генерации");
+          return;
+        }
         if (r.retryAfter) {
           // BytePlus просит подождать (лимит запросов) — проверим этот реф ещё раз чуть позже
           setTimeout(() => { setChecks((c) => { const n = { ...c }; delete n[it.url]; return n; }); setRetryTick((x) => x + 1); }, r.retryAfter * 1000);

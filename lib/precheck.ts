@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { getModel } from "./models";
 import { listItems, putJSON, readJSON, localKeyOf, deleteItems, type StoredItem } from "./storage";
 import { MOCK } from "./jobs";
-import { ArkAssetError, assetStatus, assetsConfigured, createAsset, pruneOldest } from "./providers/arkAssets";
+import { ArkAssetError, assetStatus, assetsConfigured, createAsset, pruneOldest, recentStatuses } from "./providers/arkAssets";
 import { LIMITS, overQuota } from "./usage";
 import { ProviderError } from "./providers/higgsfield";
 
@@ -34,7 +34,13 @@ const FAIL_TEXT = "BytePlus не пропустил реф: похоже на р
 // раньше он принимался за нехватку места, и студия удаляла 10 старых ассетов — в том числе только что проверенные рефы
 const RATE = /QPM|QPS|RPM|rate limit|Throttl|TooMany|FlowLimit|RequestLimit/i;
 const isThrottle = (e: unknown) => e instanceof ArkAssetError && (e.status === 429 || RATE.test(`${e.code} ${e.message}`));
-const isQuota = (e: unknown) => e instanceof ArkAssetError && !RATE.test(`${e.code} ${e.message}`) && /Quota|Exceed.*(Asset|Capacity)|Capacity/i.test(`${e.code} ${e.message}`);
+// «Место кончилось» узнаём по тексту ошибки, а не по коду ответа: BytePlus может вернуть на переполненную библиотеку и 429.
+// Поэтому эта проверка идёт раньше проверки на лимит частоты — иначе студия бесконечно «ждала», а место не освобождала
+const isQuota = (e: unknown) => e instanceof ArkAssetError && !RATE.test(`${e.code} ${e.message}`) && /Quota|Capacity|LimitExceeded|Exceed/i.test(`${e.code} ${e.message}`);
+// Причины «подождите» и «нет места» раньше нигде не писались — зависшую проверку было нечем объяснить
+const note = (what: string, e: unknown) => console.warn(`[precheck] ${what}:`, e instanceof ArkAssetError ? `${e.status} ${e.code ?? ""} ${e.message}`.slice(0, 300) : (e as Error)?.message);
+// Сколько ассетов BytePlus держит на аккаунт (ARK_ASSET_CAP, если тариф другой). Место освобождаем заранее, не дожидаясь отказа
+const assetCap = () => { const n = Number(process.env.ARK_ASSET_CAP); return Number.isFinite(n) && n > 0 ? n : 50; };
 
 const NO_SUB = "Проверка рефов через библиотеку BytePlus доступна только на платной подписке Advanced/Premium в ModelArk. Seedance проверит референс сам при запуске генерации";
 const isNoSubscription = (e: unknown) => e instanceof ArkAssetError && /SubscriptionRequired/i.test(`${e.code} ${e.message}`);
@@ -112,7 +118,7 @@ export async function precheckSeedance(modelId: string, url: string, kind: "imag
   // Уже создан и ещё проверяется: один дешёвый запрос статуса (общий ListAssets), без ожидания в цикле
   if (rec?.assetId) {
     if (Date.now() - rec.at < 5_000) return { ...rec, retryAfter: 6 };
-    const st = await assetStatus(rec.assetId).catch((e) => { if (isThrottle(e)) return null; throw e; });
+    const st = await assetStatus(rec.assetId).catch((e) => { if (isThrottle(e)) { note("статус ассета, лимит частоты", e); return null; } throw e; });
     if (!st) return { ...rec, retryAfter: 15 };
     if (st.status === "Missing") { await dropRec(item); return { ok: false, retryAfter: 1, at: Date.now() }; }
     const res = verdict(rec.assetId, st);
@@ -133,17 +139,31 @@ export async function precheckSeedance(modelId: string, url: string, kind: "imag
   }
   if (await overQuota("ark:create-asset", createQpm(), 60_000)) return { ok: false, retryAfter: waitSec(), at: Date.now() };
 
+  // Библиотека почти заполнена — освобождаем место заранее (самые старые ассеты), чтобы создание не упёрлось в отказ
+  const known = await recentStatuses().catch(() => null);
+  if (known && known.size >= assetCap() - 5) {
+    const freed = await pruneOldest(10).catch((e) => { note("очистка библиотеки", e); return 0; });
+    console.warn(`[precheck] библиотека ассетов: ${known.size} из ${assetCap()}, удалено старых: ${freed}`);
+  }
+
   let assetId: string;
   const name = `ref ${new Date().toISOString().slice(0, 16)}`;
   try {
     assetId = await createAsset(url, kind, name, groupOf(scope));
   } catch (e) {
     if (isNoSubscription(e)) { noSubscriptionUntil = Date.now() + 10 * 60_000; return { ok: true, at: Date.now(), skipped: true, skipReason: NO_SUB }; }
-    if (isThrottle(e)) { throttledUntil = Date.now() + 20_000; return { ok: false, retryAfter: 22, at: Date.now() }; }
-    if (!isQuota(e)) throw e;
-    // Место в библиотеке закончилось — удаляем самые старые наши ассеты и пробуем ещё раз
-    await pruneOldest(10);
-    assetId = await createAsset(url, kind, name, groupOf(scope));
+    if (isQuota(e)) {
+      // Место в библиотеке закончилось — удаляем самые старые наши ассеты и пробуем ещё раз.
+      // Не получилось и после этого — ошибка уходит пользователю как «проверка не сработала», реф не зависает
+      note("создание ассета, нет места", e);
+      const freed = await pruneOldest(10);
+      console.warn(`[precheck] удалено старых ассетов: ${freed}`);
+      assetId = await createAsset(url, kind, name, groupOf(scope));
+    } else if (isThrottle(e)) {
+      note("создание ассета, лимит частоты", e);
+      throttledUntil = Date.now() + 20_000;
+      return { ok: false, retryAfter: 22, at: Date.now() };
+    } else throw e;
   }
   // Первую проверку статуса делаем через несколько секунд — обычно BytePlus успевает за 5–20 с
   const res: PrecheckResult = { ok: true, assetId, status: "Processing", at: Date.now(), ...(fp ? { fp } : {}) };
