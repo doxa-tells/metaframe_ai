@@ -14,6 +14,7 @@ const SAMPLES: { label: string; modelId: string; modeId: string; params: Record<
   { label: "Фото Seedream 5.0 Lite", modelId: "seedream-5.0-lite", modeId: "generate", params: { count: 1 } },
   { label: "Фото Soul 2", modelId: "soul-2", modeId: "generate", params: { batch_size: 1 } },
   { label: "Видео Seedance 2.5, 5 с, 720p", modelId: "seedance-2.5", modeId: "image", params: { resolution: "720p", duration: 5 } },
+  { label: "Видео Seedance 2.5 Flash, 5 с, 720p", modelId: "seedance-2.5-flash", modeId: "image", params: { resolution: "720p", duration: 5 } },
   { label: "Видео Seedance 2.5, 5 с, 1080p", modelId: "seedance-2.5", modeId: "image", params: { resolution: "1080p", duration: 5 } },
   { label: "Видео Kling 4.0, 5 с, 1080p", modelId: "kling-4.0", modeId: "image", params: { resolution: "1080p", duration: 5 } },
   { label: "Видео Gemini Omni Flash, 8 с, 720p", modelId: "gemini-omni-flash", modeId: "text", params: { resolution: "720p", duration: 8 } },

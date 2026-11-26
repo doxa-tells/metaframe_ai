@@ -417,25 +417,29 @@ async function finalize(id: string, patch: Partial<JobRecord>): Promise<JobRecor
 //   — полоса: s — синхронная (без потолка), h — Higgsfield, b — видео BytePlus, g — видео Google, m — тестовый режим;
 //   — r — занимает слот провайдера (или вот-вот займёт), q — ждёт в очереди студии.
 // По этим же меткам сервер сам доводит задачи, даже если вкладку закрыли (sweepPending).
-export type Lane = "s" | "g" | "h" | "b" | "m";
+export type Lane = "s" | "g" | "h" | "b" | "f" | "m";
 export type ActiveMark = { id: string; kind: Kind; uid: string; lane: Lane | "?"; queued: boolean; at: number; item: StoredItem };
 
-export function laneOf(model: { provider: ProviderId; kind: Kind }): Lane {
+// Полоса — отдельный счётчик одновременных задач у провайдера. У BytePlus лимит считается на модель,
+// поэтому Seedance Flash идёт своей полосой и не занимает слоты основной Seedance
+export function laneOf(model: { id?: string; provider: ProviderId; kind: Kind }): Lane {
   if (MOCK) return model.kind === "image" ? "s" : "m";
   if (model.provider === "higgsfield") return "h";
   if (model.kind === "image") return "s";
-  return model.provider === "google" ? "g" : "b";
+  if (model.provider === "google") return "g";
+  return model.id === "seedance-2.5-flash" ? "f" : "b";
 }
 // Сколько задач студия держит у провайдера одновременно (сверх этого — очередь). Меняется переменными
-// CAP_HIGGSFIELD, CAP_BYTEPLUS, CAP_GOOGLE: ставьте чуть ниже лимита одновременных задач в консоли провайдера
-const LANE_ENV: Record<string, string> = { g: "GOOGLE", h: "HIGGSFIELD", b: "BYTEPLUS", m: "MOCK" };
+// CAP_HIGGSFIELD, CAP_BYTEPLUS, CAP_BYTEPLUS_FLASH, CAP_GOOGLE: ставьте чуть ниже лимита одновременных задач в консоли провайдера
+// (BytePlus, аккаунт организации: по 10 на Seedance 2.5 и на Seedance 2.5 Flash — отсюда 8 по умолчанию)
+const LANE_ENV: Record<string, string> = { g: "GOOGLE", h: "HIGGSFIELD", b: "BYTEPLUS", f: "BYTEPLUS_FLASH", m: "MOCK" };
 export function laneCap(lane: Lane | "?"): number {
   if (!LANE_ENV[lane]) return Infinity;
   const n = Number(process.env[`CAP_${LANE_ENV[lane]}`]);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 8;
 }
 
-const MARK_RE = /^pending-index\/((?:image|video)_\d{13}_[a-f0-9]{8}(?:_u[a-f0-9]{10})?)(?:~([sghbm])~([rq]))?\.json$/;
+const MARK_RE = /^pending-index\/((?:image|video)_\d{13}_[a-f0-9]{8}(?:_u[a-f0-9]{10})?)(?:~([sghbfm])~([rq]))?\.json$/;
 const markPath = (id: string, lane: Lane, queued: boolean) => `pending-index/${id}~${lane}~${queued ? "q" : "r"}.json`;
 const createdAtOf = (id: string) => 9_999_999_999_999 - Number(id.split("_")[1]);
 // Метка без движения дольше этого срока слот не держит (задача зависла или метку не убрали — её подберёт sweepPending)

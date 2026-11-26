@@ -1,7 +1,7 @@
 "use client";
 import { Handle, Position, useReactFlow, type NodeProps, type Node } from "@xyflow/react";
 import { useContext, createContext } from "react";
-import { getModel, formatUsd, estimateCost, MODELS, type GenRequest } from "@/lib/models";
+import { getModel, formatUsd, estimateCost, CATALOG, type GenRequest } from "@/lib/models";
 import { creditsFor, creditsWord, formatCredits } from "@/lib/credits";
 import { useMe } from "../MeContext";
 
@@ -125,7 +125,7 @@ function ParamSelect({ label, value, options, onChange }: { label: string; value
   );
 }
 
-const IMAGE_MODELS = MODELS.filter((m) => m.kind === "image");
+const IMAGE_MODELS = CATALOG.filter((m) => m.kind === "image");
 const QUALITY_KEYS = ["image_size", "size", "resolution"];
 
 export function ImageGenNode({ id, data, selected }: NodeProps<FlowNode>) {
@@ -183,7 +183,7 @@ export function VideoGenNode({ id, data, selected }: NodeProps<FlowNode>) {
       <label className="mini-field nodrag">
         <span>Модель</span>
         <select value={modelId} onChange={(e) => updateNodeData(id, { modelId: e.target.value, params: {} })}>
-          {MODELS.filter((m) => m.kind === "video" && !m.modes.some((x) => x.source) && m.id !== "seedance-2.5-hf").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          {CATALOG.filter((m) => m.kind === "video" && !m.modes.some((x) => x.source)).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
       </label>
       <div className="mini-grid">

@@ -11,9 +11,9 @@ Next.js 16 на Vercel (проект `metaframe-ai`, команда doxa-tells, 
 
 ## Провайдеры
 - Google: Nano Banana 2.1, Gemini Omni (`lib/providers/google.ts`).
-- BytePlus (Ark): Seedream 5.5 и 5.0, Seedance 2.5 напрямую (`lib/providers/byteplus.ts`, `arkAssets.ts`).
+- BytePlus (Ark): Seedream 5.5 и 5.0, Seedance 2.5 и 2.5 Flash напрямую (`lib/providers/byteplus.ts`, `arkAssets.ts`).
   База API: https://ark.ap-southeast.bytepluses.com/api/v3. Постоплата, библиотека ассетов: 3 создания в минуту, 50 ассетов.
-- Higgsfield API: Soul, Kling 4.0, Genjutsu, Seedance-HF (`lib/providers/higgsfield.ts`).
+- Higgsfield API: Soul, Kling 4.0, Genjutsu (`lib/providers/higgsfield.ts`). Seedance через Higgsfield снята с каталога (`retired`): модели покупаем только напрямую у производителя, без посредников.
 - Хранилище: Cloudflare R2 через воркер (`cloudflare/`, `lib/storage.ts`). Деплой воркера: `cd cloudflare && npx wrangler deploy`.
 
 ## Где что лежит

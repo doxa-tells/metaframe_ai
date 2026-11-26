@@ -359,9 +359,6 @@ export function VideoPanel(p: Props) {
             <Icon name="info" size={13} />
             <span>
               {checkInfo}
-              {/Higgsfield/.test(checkInfo) && (
-                <button type="button" className="pc-switch" onClick={() => { setCheckInfo(null); p.onModel("seedance-2.5-hf"); }}>Переключить на Seedance · Higgsfield</button>
-              )}
             </span>
             <button type="button" onClick={() => setCheckInfo(null)} aria-label="Скрыть"><Icon name="x" size={11} /></button>
           </div>

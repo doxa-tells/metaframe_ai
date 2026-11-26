@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MODELS, defaultParams, estimateCost, firstMode, formatUsd, getModel, validateRequest, visibleMode, type Kind } from "@/lib/models";
+import { CATALOG, defaultParams, estimateCost, firstMode, formatUsd, liveModel, validateRequest, visibleMode, type Kind } from "@/lib/models";
 import { bulkDelete, cachedJobs, cancelJob, deleteJob, generate, isTerminal, listJobs, rememberJobs, waitForJob, type Job } from "@/lib/client";
 import { useApp } from "./AppContext";
 import { Gallery, type BulkItem } from "./Gallery";
@@ -25,7 +25,7 @@ type FormState = {
 const k = (m: string, mode: string) => `${m}:${mode}`;
 
 function initialForm(kind: Kind): FormState {
-  const model = MODELS.find((m) => m.kind === kind)!;
+  const model = CATALOG.find((m) => m.kind === kind)!;
   return { modelId: model.id, modeId: firstMode(model).id, prompt: "", params: {}, inputs: {} };
 }
 
@@ -43,7 +43,7 @@ export function Studio({ kind }: { kind: Kind }) {
   const polling = useRef(new Set<string>());
   const alive = useRef({ cancelled: false });
 
-  const model = getModel(form.modelId) ?? MODELS.find((m) => m.kind === kind)!;
+  const model = liveModel(form.modelId) ?? CATALOG.find((m) => m.kind === kind)!;
   const mode = visibleMode(model, form.modeId);
   const key = k(model.id, mode.id);
   const params = useMemo(() => ({ ...defaultParams(mode), ...(form.params[key] ?? {}) }), [mode, form.params, key]);
@@ -73,14 +73,14 @@ export function Studio({ kind }: { kind: Kind }) {
       const raw = localStorage.getItem(storeKey);
       if (raw) {
         const saved = JSON.parse(raw) as FormState;
-        if (getModel(saved.modelId)?.kind === kind) setForm(saved);
+        if (liveModel(saved.modelId)?.kind === kind) setForm(saved);
       }
       // Кадр, переданный из раздела «Фото» кнопкой «Анимировать»
       const hand = localStorage.getItem("handoff.animate");
       if (hand && kind === "video") {
         localStorage.removeItem("handoff.animate");
         setForm((f) => {
-          const m = getModel(f.modelId) ?? MODELS.find((x) => x.kind === "video")!;
+          const m = liveModel(f.modelId) ?? CATALOG.find((x) => x.kind === "video")!;
           const mode = m.modes.find((x) => x.inputs.some((i) => i.key === "image_url")) ?? m.modes[0];
           const kk = k(m.id, mode.id);
           return { ...f, modelId: m.id, modeId: mode.id, inputs: { ...f.inputs, [kk]: { ...(f.inputs[kk] ?? {}), image_url: [hand] } } };
@@ -151,8 +151,8 @@ export function Studio({ kind }: { kind: Kind }) {
   // При смене модели или режима референсы переезжают в новую: раскладываем их по входам того же типа
   // (картинки к картинкам, видео к видео), сколько влезет
   function carry(f: FormState, toModelId: string, toModeId: string): FormState {
-    const fromModel = getModel(f.modelId);
-    const toModel = getModel(toModelId);
+    const fromModel = liveModel(f.modelId);
+    const toModel = liveModel(toModelId);
     if (!fromModel || !toModel) return { ...f, modelId: toModelId, modeId: toModeId };
     const fromMode = visibleMode(fromModel, f.modeId);
     const toMode = visibleMode(toModel, toModeId);
@@ -165,7 +165,7 @@ export function Studio({ kind }: { kind: Kind }) {
     return { ...next, inputs: { ...f.inputs, [k(toModel.id, toMode.id)]: dst } };
   }
   function setModel(id: string) {
-    const m = getModel(id)!;
+    const m = liveModel(id)!;
     setForm((f) => carry(f, id, m.modes.some((x) => x.id === f.modeId) ? visibleMode(m, f.modeId).id : firstMode(m).id));
   }
   function setParam(pk: string, v: unknown) {
@@ -212,11 +212,12 @@ export function Studio({ kind }: { kind: Kind }) {
   }
 
   function reuse(job: Job) {
-    const jm = getModel(job.modelId);
-    const modeId = jm ? visibleMode(jm, job.modeId).id : job.modeId;
-    const kk = k(job.modelId, modeId);
+    // Модель задачи могла быть снята с каталога — настройки переносим на первую доступную того же вида
+    const jm = liveModel(job.modelId) ?? CATALOG.find((m) => m.kind === job.kind)!;
+    const modeId = visibleMode(jm, job.modeId).id;
+    const kk = k(jm.id, modeId);
     setForm((f) => ({
-      ...f, modelId: job.modelId, modeId, prompt: job.prompt, pool: undefined,
+      ...f, modelId: jm.id, modeId, prompt: job.prompt, pool: undefined,
       params: { ...f.params, [kk]: job.params }, inputs: { ...f.inputs, [kk]: job.inputs },
     }));
   }
@@ -259,7 +260,7 @@ export function Studio({ kind }: { kind: Kind }) {
     try { await cancelJob(job); } catch (e) { setError((e as Error).message); }
   }
 
-  const models = MODELS.filter((m) => m.kind === kind);
+  const models = CATALOG.filter((m) => m.kind === kind);
   const shared = {
     models, model, mode, prompt: form.prompt, params, inputs, cost, priceText, validation, error, missingKey,
     onModel: setModel,

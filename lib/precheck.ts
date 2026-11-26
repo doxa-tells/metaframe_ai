@@ -36,7 +36,7 @@ const RATE = /QPM|QPS|RPM|rate limit|Throttl|TooMany|FlowLimit|RequestLimit/i;
 const isThrottle = (e: unknown) => e instanceof ArkAssetError && (e.status === 429 || RATE.test(`${e.code} ${e.message}`));
 const isQuota = (e: unknown) => e instanceof ArkAssetError && !RATE.test(`${e.code} ${e.message}`) && /Quota|Exceed.*(Asset|Capacity)|Capacity/i.test(`${e.code} ${e.message}`);
 
-const NO_SUB = "Проверка рефов через библиотеку BytePlus доступна только на платной подписке Advanced/Premium в ModelArk. Для рефов с лицами переключитесь на «Seedance 2.5 · Higgsfield»";
+const NO_SUB = "Проверка рефов через библиотеку BytePlus доступна только на платной подписке Advanced/Premium в ModelArk. Seedance проверит референс сам при запуске генерации";
 const isNoSubscription = (e: unknown) => e instanceof ArkAssetError && /SubscriptionRequired/i.test(`${e.code} ${e.message}`);
 let noSubscriptionUntil = 0;
 

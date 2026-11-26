@@ -52,6 +52,7 @@ export type ModelSpec = {
   provider: ProviderId;
   description: string;
   badge?: string;
+  retired?: boolean; // снята с каталога: в списках не показывается и новые генерации не принимает; старые задачи открываются как раньше
   modes: ModeSpec[];
   priceNote: string;
   price: (modeId: string, params: Record<string, unknown>, inputs?: Record<string, string[]>) => number; // USD (inputs — референсы, если модель берёт за них отдельно)
@@ -215,6 +216,29 @@ const seedance: ModelSpec = {
   ],
 };
 
+// ---------- Seedance 2.5 Flash (BytePlus ModelArk напрямую) ----------
+// Та же линейка, быстрая модель: по данным BytePlus вдвое быстрее, 480p и 720p, до 10 изображений, 5 видео и 5 аудио.
+// У неё свой лимит одновременных задач в ModelArk, поэтому и своя полоса очереди (lib/jobs: laneOf)
+const SDF_RES = { key: "resolution", label: "Разрешение", type: "select", default: "720p", options: opts("480p", "720p") } as const;
+// Прайс BytePlus: $7 за млн токенов без видео на входе (у основной модели $10.7) — цена за секунду в той же пропорции
+const SDF_PRICE: Record<string, number> = { "480p": 0.0674, "720p": 0.1511 };
+const SDF_MAX: Record<string, number> = { image_urls: 10, video_urls: 5, audio_urls: 5 };
+
+const seedanceFlash: ModelSpec = {
+  ...seedance,
+  id: "seedance-2.5-flash",
+  name: "Seedance 2.5 Flash",
+  description: "Вдвое быстрее и дешевле: до 30 секунд, звук, до 20 референсов",
+  badge: "NEW",
+  priceNote: "BytePlus: $0.067/с 480p, $0.151/с 720p",
+  price: (_m, p) => (SDF_PRICE[String(p.resolution)] ?? SDF_PRICE["720p"]) * Number(p.duration ?? 5),
+  modes: seedance.modes.map((m) => ({
+    ...m,
+    inputs: m.inputs.map((i) => (SDF_MAX[i.key] ? { ...i, max: SDF_MAX[i.key] } : i)),
+    params: m.params.map((x) => (x.key === "resolution" ? SDF_RES : x)),
+  })),
+};
+
 // ---------- Kling 4.0 (через Higgsfield API) ----------
 const KL_DUR = { key: "duration", label: "Длительность", type: "slider", min: 3, max: 30, step: 1, default: 10, unit: "с" } as const;
 const KL_RES = { key: "resolution", label: "Разрешение", type: "select", default: "1080p", options: opts("720p", "1080p") } as const;
@@ -337,9 +361,9 @@ const genjutsuLight: ModelSpec = {
   ],
 };
 
-// ---------- Seedance 2.5 через Higgsfield API ----------
-// Та же модель ByteDance, но через канал Higgsfield (на их сайте проходят референсы с лицами,
-// которые прямой BytePlus API отклоняет). Ключ — тот же HF_API_KEY.
+// ---------- Seedance 2.5 через Higgsfield API (снята с каталога) ----------
+// Та же модель ByteDance через посредника — вдвое дороже прямого BytePlus. Студия покупает модели только напрямую,
+// поэтому новые генерации закрыты (retired); описание остаётся, чтобы старые задачи открывались и считались.
 const SDH_AR: ParamSpec = { key: "aspect_ratio", label: "Формат", type: "select", default: "16:9", options: opts("16:9", "9:16", "1:1", "4:3", "3:4", "21:9") };
 const SDH_BITRATE: ParamSpec = { key: "bitrate_mode", label: "Битрейт", type: "select", default: "high", options: [{ value: "high", label: "Высокий" }, { value: "standard", label: "Обычный" }], advanced: true };
 // Прайс Higgsfield API без скидок, $/сек (с видео на входе дороже примерно на 20%)
@@ -352,6 +376,7 @@ const seedanceHf: ModelSpec = {
   vendor: "ByteDance",
   kind: "video",
   provider: "higgsfield",
+  retired: true,
   description: "Seedance 2.5 через Higgsfield: можно пробовать референсы с лицами, которые не пропускает BytePlus",
   priceNote: "Higgsfield API: ~$0.21/с 480p, $0.46/с 720p, $1.14/с 1080p (с видео-референсом дороже ~на 20%)",
   price: (_m, p) => (SDH_PRICE[String(p.resolution)] ?? 0.4622) * Number(p.duration ?? 5),
@@ -460,7 +485,10 @@ export function buildOmniPlan(req: GenRequest): {
   return { media, text, responseFormat, task };
 }
 
-export const MODELS: ModelSpec[] = [nanoBanana, seedream55, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, seedanceHf, kling, omni, genjutsu, genjutsuLight];
+export const MODELS: ModelSpec[] = [nanoBanana, seedream55, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, seedanceFlash, kling, omni, genjutsu, genjutsuLight, seedanceHf];
+// Что можно выбрать для новой генерации (без снятых с каталога)
+export const CATALOG: ModelSpec[] = MODELS.filter((m) => !m.retired);
+export const liveModel = (id: string): ModelSpec | undefined => CATALOG.find((m) => m.id === id);
 
 export function getModel(id: string): ModelSpec | undefined {
   return MODELS.find((m) => m.id === id);
@@ -524,6 +552,7 @@ export function normalizeRequest(raw: GenRequest): { ok: true; req: GenRequest }
   if (!raw || typeof raw !== "object") return bad("Некорректный запрос");
   const model = typeof raw.modelId === "string" ? getModel(raw.modelId) : undefined;
   if (!model) return bad("Неизвестная модель");
+  if (model.retired) return bad(`Модель «${model.name}» снята с каталога — выберите другую`);
   const mode = model.modes.find((m) => m.id === raw.modeId);
   if (!mode) return bad("Неизвестный режим");
   if (raw.prompt !== undefined && raw.prompt !== null && typeof raw.prompt !== "string") return bad("Некорректный промпт");
@@ -653,6 +682,7 @@ export function buildHiggsfieldBody(req: GenRequest): { endpoint: string; body: 
 // ---------- BytePlus ModelArk ----------
 export const ARK_MODEL_IDS: Record<string, string> = {
   "seedance-2.5": "dreamina-seedance-2-5-260628",
+  "seedance-2.5-flash": "dreamina-seedance-2-5-flash-261115",
   "seedream-5.5": "dola-seedream-5-5-261028",
   "seedream-5.0-lite": "seedream-5-0-260128",
   "seedream-5.0-pro": "dola-seedream-5-0-pro-260628",
