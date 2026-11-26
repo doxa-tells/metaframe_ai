@@ -34,8 +34,8 @@ type Props = {
 
 const KIND_ICON: Record<string, string> = { image: "image", video: "video", audio: "sound" };
 
-// Сколько ждём предпроверку одного референса у BytePlus, прежде чем пропустить её
-const CHECK_WAIT_MS = 120_000;
+// Через сколько объясняем, почему предпроверка референса у BytePlus затянулась (сама проверка продолжается)
+const CHECK_SLOW_MS = 60_000;
 
 export function VideoPanel(p: Props) {
   const { sendToChat } = useApp();
@@ -55,7 +55,7 @@ export function VideoPanel(p: Props) {
   const [checkInfo, setCheckInfo] = useState<string | null>(null);
   const checksRef = useRef(checks);
   checksRef.current = checks;
-  // Когда начали проверять каждый реф: дольше CHECK_WAIT_MS не ждём, чтобы проверка не блокировала запуск бесконечно
+  // Когда начали проверять каждый реф — чтобы объяснить задержку, если проверка затянулась
   const checkStart = useRef<Record<string, number>>({});
   const inputsRef = useRef(p.inputs);
   inputsRef.current = p.inputs;
@@ -71,10 +71,10 @@ export function VideoPanel(p: Props) {
       setChecks((c) => ({ ...c, [it.url]: "checking" }));
       checkStart.current[it.url] ??= Date.now();
       precheckApi(p.model.id, it.url, it.kind).then((r) => {
-        if (r.retryAfter && Date.now() - checkStart.current[it.url] > CHECK_WAIT_MS) {
-          setChecks((c) => ({ ...c, [it.url]: "skip" }));
-          setCheckInfo("BytePlus долго не отвечает на проверку референса — запускать можно: Seedance проверит его сам при генерации");
-          return;
+        // Проверку не пропускаем: запуск открывается только с настоящим вердиктом BytePlus.
+        // Если она затянулась, честно говорим почему — новые референсы BytePlus принимает по три в минуту, очередь общая
+        if (r.retryAfter && Date.now() - checkStart.current[it.url] > CHECK_SLOW_MS) {
+          setCheckInfo("Проверка идёт дольше обычного: BytePlus принимает три новых референса в минуту, очередь общая. Запуск откроется, как только придёт ответ");
         }
         if (r.retryAfter) {
           // BytePlus просит подождать (лимит запросов) — проверим этот реф ещё раз чуть позже

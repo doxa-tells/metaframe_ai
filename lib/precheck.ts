@@ -95,7 +95,9 @@ const verdict = (assetId: string, st: { status: string; reason?: string }): Prec
 export async function precheckSeedance(modelId: string, url: string, kind: "image" | "video", _origin: string, scope = ""): Promise<PrecheckResult> {
   const model = getModel(modelId);
   if (!model || model.provider !== "byteplus" || model.kind !== "video") return { ok: true, at: Date.now(), skipped: true };
-  const { path, rec, item } = await readRec(url, scope);
+  const found = await readRec(url, scope);
+  const { path, item } = found;
+  let rec = found.rec;
 
   if (MOCK) {
     if (rec) return rec;
@@ -111,7 +113,15 @@ export async function precheckSeedance(modelId: string, url: string, kind: "imag
   if (!assetsConfigured()) return { ok: true, at: Date.now(), skipped: true, skipReason: "Предпроверка выключена: в Vercel не видны BYTEPLUS_ACCESS_KEY и BYTEPLUS_SECRET_KEY (проверьте имена и сделайте Redeploy)" };
   if (localKeyOf(url)) return { ok: true, at: Date.now(), skipped: true, skipReason: "Локальный файл — BytePlus не может его скачать" };
 
-  if (rec?.status === "Active" || rec?.status === "Failed") return { ...rec, retryAfter: undefined };
+  if (rec?.status === "Failed") return { ...rec, retryAfter: undefined };
+  if (rec?.status === "Active") {
+    // Галочка должна быть правдой: старые ассеты удаляются, когда библиотеке нужно место под новые рефы.
+    // Ассета больше нет — проверяем реф заново, а не показываем устаревшее «проверено»
+    const live = await recentStatuses().catch(() => null);
+    if (!live || live.size >= 100 || !rec.assetId || live.has(rec.assetId)) return { ...rec, retryAfter: undefined };
+    await dropRec(item);
+    rec = null;
+  }
   // Библиотека ассетов доступна только на платной подписке BytePlus — не дёргаем API зря
   if (noSubscriptionUntil > Date.now()) return { ok: true, at: Date.now(), skipped: true, skipReason: NO_SUB };
 
