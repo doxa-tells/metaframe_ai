@@ -10,10 +10,10 @@ Next.js 16 на Vercel (проект `metaframe-ai`, команда doxa-tells, 
 - Отвечать по-русски, коротко, без воды.
 
 ## Провайдеры
-- Google: Nano Banana 2.1, Gemini Omni (`lib/providers/google.ts`).
+- Google: Nano Banana 2.1, Nano Banana Pro, Nano Banana 2 Lite, Gemini Omni (`lib/providers/google.ts`).
 - BytePlus (Ark): Seedream 5.5 и 5.0, Seedance 2.5 и 2.5 Flash напрямую (`lib/providers/byteplus.ts`, `arkAssets.ts`).
   База API: https://ark.ap-southeast.bytepluses.com/api/v3. Постоплата, библиотека ассетов: 3 создания в минуту, 50 ассетов.
-- Higgsfield API: Soul, Kling 4.0, Genjutsu (`lib/providers/higgsfield.ts`). Seedance через Higgsfield снята с каталога (`retired`): модели покупаем только напрямую у производителя, без посредников.
+- Higgsfield API: Soul, Kling 4.0, Genjutsu, MAGI-2 (`lib/providers/higgsfield.ts`). MAGI-2 — одна генерация за раз на аккаунт, своя полоса очереди (`CAP_HIGGSFIELD_MAGI`, по умолчанию 2). Seedance через Higgsfield снята с каталога (`retired`): модели покупаем только напрямую у производителя, без посредников.
 - Хранилище: Cloudflare R2 через воркер (`cloudflare/`, `lib/storage.ts`). Деплой воркера: `cd cloudflare && npx wrangler deploy`.
 
 ## Где что лежит

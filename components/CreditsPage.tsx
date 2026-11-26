@@ -10,12 +10,15 @@ import { useCredits } from "./useCredits";
 // Сколько стоят популярные генерации — считается той же функцией, что и списание
 const SAMPLES: { label: string; modelId: string; modeId: string; params: Record<string, unknown> }[] = [
   { label: "Фото Nano Banana 2.1, 2K", modelId: "nano-banana-2.1", modeId: "generate", params: { image_size: "2K", count: 1 } },
+  { label: "Фото Nano Banana Pro, 2K", modelId: "nano-banana-pro", modeId: "generate", params: { image_size: "2K", count: 1 } },
+  { label: "Фото Nano Banana 2 Lite", modelId: "nano-banana-2-lite", modeId: "generate", params: { count: 1 } },
   { label: "Фото Seedream 5.5, 2K", modelId: "seedream-5.5", modeId: "generate", params: { size: "2K", count: 1 } },
   { label: "Фото Seedream 5.0 Lite", modelId: "seedream-5.0-lite", modeId: "generate", params: { count: 1 } },
   { label: "Фото Soul 2", modelId: "soul-2", modeId: "generate", params: { batch_size: 1 } },
   { label: "Видео Seedance 2.5, 5 с, 720p", modelId: "seedance-2.5", modeId: "image", params: { resolution: "720p", duration: 5 } },
   { label: "Видео Seedance 2.5 Flash, 5 с, 720p", modelId: "seedance-2.5-flash", modeId: "image", params: { resolution: "720p", duration: 5 } },
   { label: "Видео Seedance 2.5, 5 с, 1080p", modelId: "seedance-2.5", modeId: "image", params: { resolution: "1080p", duration: 5 } },
+  { label: "Видео MAGI-2, 5 с, 1080p", modelId: "magi-2", modeId: "image", params: { duration: 5 } },
   { label: "Видео Kling 4.0, 5 с, 1080p", modelId: "kling-4.0", modeId: "image", params: { resolution: "1080p", duration: 5 } },
   { label: "Видео Gemini Omni Flash, 8 с, 720p", modelId: "gemini-omni-flash", modeId: "text", params: { resolution: "720p", duration: 8 } },
 ];

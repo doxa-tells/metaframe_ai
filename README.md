@@ -1,6 +1,6 @@
 # AI Studio
 
-Личный агрегатор генераций: Nano Banana 2.1 (Google), Seedream 5.5 / 5.0, Seedance 2.5 и Seedance 2.5 Flash (BytePlus напрямую), Higgsfield Soul 2 и Soul Cinema, Kling 4.0 (через Higgsfield).
+Личный агрегатор генераций: Nano Banana 2.1, Pro и 2 Lite (Google), Seedream 5.5 / 5.0, Seedance 2.5 и Seedance 2.5 Flash (BytePlus напрямую), Higgsfield Soul 2 и Soul Cinema, Kling 4.0 и MAGI-2 (через Higgsfield).
 Разделы: Фото (с историей), Видео, Ноды (React Flow) и боковой промпт-ассистент.
 
 ## Переменные окружения

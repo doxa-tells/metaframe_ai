@@ -20,6 +20,7 @@ type FormState = {
   params: Record<string, Record<string, unknown>>; // по ключу model:mode
   inputs: Record<string, Record<string, string[]>>;
   pool?: Record<string, string[]>; // все рефы по типам — переживают переход через модель, где мест меньше
+  ar?: string; // последний выбранный формат — переезжает вместе с пользователем в другую модель и режим
 };
 
 const k = (m: string, mode: string) => `${m}:${mode}`;
@@ -157,19 +158,28 @@ export function Studio({ kind }: { kind: Kind }) {
     const fromMode = visibleMode(fromModel, f.modeId);
     const toMode = visibleMode(toModel, toModeId);
     const pool = poolOf(f.pool, fromMode, f.inputs[k(fromModel.id, fromMode.id)] ?? {});
-    const next = { ...f, modelId: toModel.id, modeId: toMode.id, pool };
+    // Формат остаётся тем же, что был выбран: иначе новая модель молча ставит свой, и генерация уходит не в том формате.
+    // Если новая модель такой формат не умеет, остаётся её собственный
+    const toKey = k(toModel.id, toMode.id);
+    const ar = String(({ ...defaultParams(fromMode), ...(f.params[k(fromModel.id, fromMode.id)] ?? {}) } as Record<string, unknown>).aspect_ratio ?? f.ar ?? "");
+    const arSpec = toMode.params.find((x) => x.key === "aspect_ratio");
+    const arOpts = arSpec?.type === "select" ? arSpec.options.map((o) => o.value) : [];
+    const AUTO = ["auto", "adaptive"]; // «Авто» у разных моделей называется по-разному
+    const arTo = arOpts.includes(ar) ? ar : AUTO.includes(ar) ? arOpts.find((o) => AUTO.includes(o)) : undefined;
+    const params = arTo ? { ...f.params, [toKey]: { ...(f.params[toKey] ?? {}), aspect_ratio: arTo } } : f.params;
+    const next = { ...f, modelId: toModel.id, modeId: toMode.id, pool, params, ar: ar || f.ar };
     if (!Object.values(pool).some((l) => l.length)) return next; // переносить нечего — у новой модели остаются её рефы
     const left: Record<string, string[]> = Object.fromEntries(Object.entries(pool).map(([kk, v]) => [kk, [...v]]));
     const dst: Record<string, string[]> = {};
     for (const inp of toMode.inputs) dst[inp.key] = (left[inp.kind] ?? []).splice(0, inp.max);
-    return { ...next, inputs: { ...f.inputs, [k(toModel.id, toMode.id)]: dst } };
+    return { ...next, inputs: { ...f.inputs, [toKey]: dst } };
   }
   function setModel(id: string) {
     const m = liveModel(id)!;
     setForm((f) => carry(f, id, m.modes.some((x) => x.id === f.modeId) ? visibleMode(m, f.modeId).id : firstMode(m).id));
   }
   function setParam(pk: string, v: unknown) {
-    setForm((f) => ({ ...f, params: { ...f.params, [key]: { ...(f.params[key] ?? params), [pk]: v } } }));
+    setForm((f) => ({ ...f, ...(pk === "aspect_ratio" ? { ar: String(v) } : {}), params: { ...f.params, [key]: { ...(f.params[key] ?? params), [pk]: v } } }));
   }
   function setInput(ik: string, v: string[]) {
     setForm((f) => {
@@ -218,6 +228,7 @@ export function Studio({ kind }: { kind: Kind }) {
     const kk = k(jm.id, modeId);
     setForm((f) => ({
       ...f, modelId: jm.id, modeId, prompt: job.prompt, pool: undefined,
+      ...(job.params?.aspect_ratio ? { ar: String(job.params.aspect_ratio) } : {}),
       params: { ...f.params, [kk]: job.params }, inputs: { ...f.inputs, [kk]: job.inputs },
     }));
   }

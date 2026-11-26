@@ -91,6 +91,60 @@ const nanoBanana: ModelSpec = {
   ],
 };
 
+// ---------- Nano Banana 2 Lite и Nano Banana Pro (Google Gemini API, тот же ключ) ----------
+// Форматы — общий для всех моделей набор; у Lite только 1K (в прайсе Google другого размера нет)
+const NB_AR: ParamSpec = { key: "aspect_ratio", label: "Формат", type: "select", default: "auto",
+  options: [{ value: "auto", label: "Авто" }, ...opts("1:1", "3:4", "4:3", "2:3", "3:2", "4:5", "5:4", "9:16", "16:9", "21:9")] };
+const NB_COUNT: ParamSpec = { key: "count", label: "Количество", type: "select", default: "1", options: opts("1", "2", "3", "4") };
+const NB_LITE_PRICE = 0.0336;
+const NB_PRO_PRICE: Record<string, number> = { "1K": 0.134, "2K": 0.134, "4K": 0.24 };
+
+const nanoBananaLite: ModelSpec = {
+  id: "nano-banana-2-lite",
+  name: "Nano Banana 2 Lite",
+  vendor: "Google",
+  kind: "image",
+  provider: "google",
+  description: "Самая быстрая: черновики и перебор идей, 1K, до 3 референсов",
+  badge: "NEW",
+  priceNote: "Gemini API: $0.0336 за изображение 1K",
+  price: (_m, p) => NB_LITE_PRICE * Number(p.count ?? 1),
+  modes: [
+    {
+      id: "generate", label: "Генерация", promptRequired: true,
+      inputs: [{ key: "refs", label: "Референсы", kind: "image", max: 3 }],
+      params: [
+        NB_AR, NB_COUNT,
+        { key: "thinking", label: "Размышление", type: "select", default: "minimal", advanced: true,
+          options: [{ value: "minimal", label: "Минимальное" }, { value: "high", label: "Высокое" }] },
+      ],
+    },
+  ],
+};
+
+const nanoBananaPro: ModelSpec = {
+  id: "nano-banana-pro",
+  name: "Nano Banana Pro",
+  vendor: "Google",
+  kind: "image",
+  provider: "google",
+  description: "Премиум: сложные сцены, точный текст и фирменный стиль, до 4K и 14 референсов",
+  badge: "PRO",
+  priceNote: "Gemini API: $0.134 за 1K и 2K, $0.24 за 4K",
+  price: (_m, p) => (NB_PRO_PRICE[String(p.image_size)] ?? 0.134) * Number(p.count ?? 1),
+  modes: [
+    {
+      id: "generate", label: "Генерация", promptRequired: true,
+      inputs: [{ key: "refs", label: "Референсы", kind: "image", max: 14, hint: "до 6 объектов, 5 персонажей и 3 стилей" }],
+      params: [
+        NB_AR,
+        { key: "image_size", label: "Качество", type: "select", default: "2K", options: opts("1K", "2K", "4K") },
+        NB_COUNT,
+      ],
+    },
+  ],
+};
+
 // ---------- Higgsfield Soul 2 и Soul Cinema ----------
 const SOUL_AR = opts("9:16", "3:4", "2:3", "1:1", "4:3", "3:2", "16:9");
 const soulParams = (defAr: string, enhance: boolean, withStyle: boolean): ParamSpec[] => [
@@ -361,6 +415,51 @@ const genjutsuLight: ModelSpec = {
   ],
 };
 
+// ---------- MAGI-2 (Sand AI, через Higgsfield API) ----------
+// 1080p со звуком, $0.08 за секунду. У Higgsfield на аккаунт идёт одна генерация MAGI-2 за раз (на все три режима),
+// остальные ждут у них в очереди — поэтому у модели своя полоса с маленьким потолком (lib/jobs: laneOf)
+const MG_DUR = { key: "duration", label: "Длительность", type: "slider", min: 4, max: 30, step: 1, default: 5, unit: "с" } as const;
+const MG_AR: ParamSpec = { key: "aspect_ratio", label: "Формат", type: "select", default: "16:9", options: opts("16:9", "9:16", "1:1", "4:3", "3:4", "21:9") };
+const MG_SEED: ParamSpec = { key: "seed", label: "Seed", type: "seed", advanced: true };
+const MG_PRICE = 0.08;
+
+const magi: ModelSpec = {
+  id: "magi-2",
+  name: "MAGI-2",
+  vendor: "Sand AI",
+  kind: "video",
+  provider: "higgsfield",
+  description: "1080p со звуком, до 30 секунд, до 20 референсов. Генерации идут по одной — остальные ждут в очереди",
+  badge: "NEW",
+  priceNote: "Higgsfield API: $0.08/с, 1080p, звук включён",
+  price: (_m, p) => MG_PRICE * Number(p.duration ?? 5),
+  modes: [
+    {
+      id: "reference", label: "Промпт и референсы", endpoint: "sand/magi-2/reference-to-video",
+      promptRequired: false, textFallback: "text",
+      inputs: [
+        { key: "image_urls", label: "Изображения", kind: "image", max: 10 },
+        { key: "video_urls", label: "Видео (2–30 с)", kind: "video", max: 5 },
+        { key: "audio_urls", label: "Аудио (wav/mp3)", kind: "audio", max: 5 },
+      ],
+      params: [MG_DUR, MG_AR, SD_AUDIO, MG_SEED],
+      hint: "Референсы необязательны — без них видео строится по промпту. Видео и аудио — в сумме не длиннее 30 с каждого вида",
+    },
+    {
+      id: "image", label: "Кадр → видео", endpoint: "sand/magi-2/image-to-video", promptRequired: false,
+      inputs: [
+        { key: "image_url", label: "Первый кадр", kind: "image", max: 1, single: true, required: true },
+        { key: "end_image_url", label: "Последний кадр", kind: "image", max: 1, single: true },
+      ],
+      params: [MG_DUR, MG_AR, SD_AUDIO, MG_SEED],
+    },
+    {
+      id: "text", label: "Текст → видео", endpoint: "sand/magi-2/text-to-video", hidden: true, promptRequired: true,
+      inputs: [], params: [MG_DUR, MG_AR, SD_AUDIO, MG_SEED],
+    },
+  ],
+};
+
 // ---------- Seedance 2.5 через Higgsfield API (снята с каталога) ----------
 // Та же модель ByteDance через посредника — вдвое дороже прямого BytePlus. Студия покупает модели только напрямую,
 // поэтому новые генерации закрыты (retired); описание остаётся, чтобы старые задачи открывались и считались.
@@ -485,7 +584,7 @@ export function buildOmniPlan(req: GenRequest): {
   return { media, text, responseFormat, task };
 }
 
-export const MODELS: ModelSpec[] = [nanoBanana, seedream55, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, seedanceFlash, kling, omni, genjutsu, genjutsuLight, seedanceHf];
+export const MODELS: ModelSpec[] = [nanoBanana, nanoBananaPro, nanoBananaLite, seedream55, seedreamLite, seedreamPro, seedreamFlash, soul, soulCinema, seedance, seedanceFlash, magi, kling, omni, genjutsu, genjutsuLight, seedanceHf];
 // Что можно выбрать для новой генерации (без снятых с каталога)
 export const CATALOG: ModelSpec[] = MODELS.filter((m) => !m.retired);
 export const liveModel = (id: string): ModelSpec | undefined => CATALOG.find((m) => m.id === id);

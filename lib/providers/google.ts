@@ -5,6 +5,13 @@ import { describeNetError, isNetworkError, withRetry } from "../net";
 // Gemini API: Nano Banana 2.1 (generateContent) и текстовая модель для чата.
 const BASE = (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
 export const NANO_MODEL = process.env.NANO_BANANA_MODEL || "gemini-nano-banana-2.1";
+// ID моделей Gemini для картинок по модели студии (переопределяются переменными окружения, если Google их обновит)
+const NANO_IDS: Record<string, string> = {
+  "nano-banana-2.1": NANO_MODEL,
+  "nano-banana-2-lite": process.env.NANO_BANANA_LITE_MODEL || "gemini-3.1-flash-lite-image",
+  "nano-banana-pro": process.env.NANO_BANANA_PRO_MODEL || "gemini-3-pro-image",
+};
+export const nanoModelId = (appModelId: string): string => NANO_IDS[appModelId] ?? NANO_MODEL;
 export const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-flash-latest";
 
 export function googleKey(): string | null {
@@ -38,8 +45,9 @@ export type NanoParams = {
   prompt: string;
   refs: { mimeType: string; data: string }[]; // base64
   aspectRatio?: string;
-  imageSize: string;
+  imageSize?: string; // нет — размер по умолчанию у модели (1K)
   thinking?: string;
+  model?: string;     // ID модели Gemini; по умолчанию Nano Banana 2.1
 };
 
 // Один повтор при обрыве связи или ответе без картинки (Gemini иногда отвечает только текстом)
@@ -56,12 +64,14 @@ async function nanoBananaOnce(p: NanoParams): Promise<{ data: Buffer; mimeType: 
   const parts: Record<string, unknown>[] = [];
   for (const r of p.refs) parts.push({ inlineData: r });
   parts.push({ text: p.prompt });
-  const imageConfig: Record<string, string> = { imageSize: p.imageSize };
+  const imageConfig: Record<string, string> = {};
+  if (p.imageSize) imageConfig.imageSize = p.imageSize;
   if (p.aspectRatio && p.aspectRatio !== "auto") imageConfig.aspectRatio = p.aspectRatio;
-  const generationConfig: Record<string, unknown> = { responseModalities: ["IMAGE"], imageConfig };
+  const generationConfig: Record<string, unknown> = { responseModalities: ["IMAGE"] };
+  if (Object.keys(imageConfig).length) generationConfig.imageConfig = imageConfig;
   if (p.thinking) generationConfig.thinkingConfig = { thinkingLevel: p.thinking };
 
-  const res = await fetch(`${BASE}/models/${NANO_MODEL}:generateContent`, {
+  const res = await fetch(`${BASE}/models/${p.model || NANO_MODEL}:generateContent`, {
     method: "POST",
     headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
     body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig }),

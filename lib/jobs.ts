@@ -6,7 +6,7 @@ import {
 import { describeNetError } from "./net";
 import { putFile, putJSON, putPrivateJSON, readPrivateJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, localKeyOf, isOwnMediaUrl, OWN_MEDIA_ERROR, StoredItem } from "./storage";
 import * as hf from "./providers/higgsfield";
-import { nanoBananaGenerate, fetchAsInline, omniSubmit, omniStatus, omniDownload, omniCancel, omniDelete, INLINE_IMAGE_MAX, INLINE_VIDEO_MAX } from "./providers/google";
+import { nanoBananaGenerate, nanoModelId, fetchAsInline, omniSubmit, omniStatus, omniDownload, omniCancel, omniDelete, INLINE_IMAGE_MAX, INLINE_VIDEO_MAX } from "./providers/google";
 import * as ark from "./providers/byteplus";
 import { withBase } from "./base";
 
@@ -236,11 +236,14 @@ export async function createJob(raw: GenRequest, origin: string, who: JobOwner =
       return runSync(base, async () => {
         const refs = await Promise.all((req.inputs.refs ?? []).filter(Boolean).map((u) => loadInline(u, origin)));
         const count = Math.min(4, Math.max(1, Number(req.params.count ?? 1) || 1));
+        const sizable = getMode(model, req.modeId).params.some((x) => x.key === "image_size");
         const results = await Promise.allSettled(
           Array.from({ length: count }, () => nanoBananaGenerate({
             prompt: base.prompt, refs,
+            model: nanoModelId(model.id),
             aspectRatio: String(req.params.aspect_ratio ?? "auto"),
-            imageSize: String(req.params.image_size ?? "2K"),
+            // Размер шлём только тем моделям, у которых он выбирается (у Lite — всегда 1K по умолчанию)
+            imageSize: sizable ? String(req.params.image_size ?? "2K") : undefined,
             thinking: req.params.thinking ? String(req.params.thinking) : undefined,
           })),
         );
@@ -417,14 +420,14 @@ async function finalize(id: string, patch: Partial<JobRecord>): Promise<JobRecor
 //   — полоса: s — синхронная (без потолка), h — Higgsfield, b — видео BytePlus, g — видео Google, m — тестовый режим;
 //   — r — занимает слот провайдера (или вот-вот займёт), q — ждёт в очереди студии.
 // По этим же меткам сервер сам доводит задачи, даже если вкладку закрыли (sweepPending).
-export type Lane = "s" | "g" | "h" | "b" | "f" | "m";
+export type Lane = "s" | "g" | "h" | "x" | "b" | "f" | "m";
 export type ActiveMark = { id: string; kind: Kind; uid: string; lane: Lane | "?"; queued: boolean; at: number; item: StoredItem };
 
 // Полоса — отдельный счётчик одновременных задач у провайдера. У BytePlus лимит считается на модель,
 // поэтому Seedance Flash идёт своей полосой и не занимает слоты основной Seedance
 export function laneOf(model: { id?: string; provider: ProviderId; kind: Kind }): Lane {
   if (MOCK) return model.kind === "image" ? "s" : "m";
-  if (model.provider === "higgsfield") return "h";
+  if (model.provider === "higgsfield") return model.id === "magi-2" ? "x" : "h";
   if (model.kind === "image") return "s";
   if (model.provider === "google") return "g";
   return model.id === "seedance-2.5-flash" ? "f" : "b";
@@ -432,14 +435,16 @@ export function laneOf(model: { id?: string; provider: ProviderId; kind: Kind })
 // Сколько задач студия держит у провайдера одновременно (сверх этого — очередь). Меняется переменными
 // CAP_HIGGSFIELD, CAP_BYTEPLUS, CAP_BYTEPLUS_FLASH, CAP_GOOGLE: ставьте чуть ниже лимита одновременных задач в консоли провайдера
 // (BytePlus, аккаунт организации: по 10 на Seedance 2.5 и на Seedance 2.5 Flash — отсюда 8 по умолчанию)
-const LANE_ENV: Record<string, string> = { g: "GOOGLE", h: "HIGGSFIELD", b: "BYTEPLUS", f: "BYTEPLUS_FLASH", m: "MOCK" };
+// MAGI-2: Higgsfield ведёт одну генерацию за раз, вторая ждёт у них — так между задачами нет простоя (CAP_HIGGSFIELD_MAGI)
+const LANE_ENV: Record<string, string> = { g: "GOOGLE", h: "HIGGSFIELD", x: "HIGGSFIELD_MAGI", b: "BYTEPLUS", f: "BYTEPLUS_FLASH", m: "MOCK" };
+const LANE_DEFAULT: Record<string, number> = { x: 2 };
 export function laneCap(lane: Lane | "?"): number {
   if (!LANE_ENV[lane]) return Infinity;
   const n = Number(process.env[`CAP_${LANE_ENV[lane]}`]);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 8;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : LANE_DEFAULT[lane] ?? 8;
 }
 
-const MARK_RE = /^pending-index\/((?:image|video)_\d{13}_[a-f0-9]{8}(?:_u[a-f0-9]{10})?)(?:~([sghbfm])~([rq]))?\.json$/;
+const MARK_RE = /^pending-index\/((?:image|video)_\d{13}_[a-f0-9]{8}(?:_u[a-f0-9]{10})?)(?:~([sghxbfm])~([rq]))?\.json$/;
 const markPath = (id: string, lane: Lane, queued: boolean) => `pending-index/${id}~${lane}~${queued ? "q" : "r"}.json`;
 const createdAtOf = (id: string) => 9_999_999_999_999 - Number(id.split("_")[1]);
 // Метка без движения дольше этого срока слот не держит (задача зависла или метку не убрали — её подберёт sweepPending)
