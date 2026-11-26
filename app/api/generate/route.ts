@@ -3,7 +3,7 @@ import { createJob, laneOf, newJobId, releaseSlot, reserveSlot } from "@/lib/job
 import { errorResponse, readJsonBody, requestOrigin } from "@/lib/http";
 import { requireCtx } from "@/lib/me";
 import { chargeCredits, ensurePlan, refundCredits } from "@/lib/moderation";
-import { getMode, getModel, normalizeRequest, SRC_DURATION, validateRequest, type GenRequest } from "@/lib/models";
+import { getMode, getModel, normalizeRequest, REF_VIDEO_SEC, SRC_DURATION, validateRequest, type GenRequest } from "@/lib/models";
 import { creditsFor } from "@/lib/credits";
 import { videoSeconds } from "@/lib/mediaprobe";
 import { isOwnMediaUrl, OWN_MEDIA_ERROR } from "@/lib/storage";
@@ -34,6 +34,16 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: `Видео длиннее ${mode.source.max} с — обрежьте его` }, { status: 400 });
       }
       body.params = { ...body.params, [SRC_DURATION]: sec ?? mode.source.max };
+    }
+    // Seedance у BytePlus: секунды видео-референсов тоже оплачиваются — считаем их на сервере, браузеру не верим.
+    // Длину не удалось определить — берём предел одного референса (30 с): лучше списать с запасом, чем работать в минус
+    const refVideos = model.provider === "byteplus" && model.kind === "video" ? (body.inputs.video_urls ?? []).filter(Boolean) : [];
+    const { [REF_VIDEO_SEC]: _client, ...cleanParams } = body.params;
+    body.params = cleanParams;
+    if (refVideos.length) {
+      if (refVideos.some((u) => !isOwnMediaUrl(u))) return NextResponse.json({ error: OWN_MEDIA_ERROR }, { status: 400 });
+      const secs = await Promise.all(refVideos.map((u) => videoSeconds(u, requestOrigin(req)).catch(() => null)));
+      body.params = { ...body.params, [REF_VIDEO_SEC]: Math.ceil(secs.reduce<number>((a, x) => a + (x && x > 0 ? x : 30), 0) * 10) / 10 };
     }
     const credits = creditsFor(body);
     if (!(credits > 0)) return NextResponse.json({ error: "Не удалось рассчитать стоимость генерации — обновите страницу и попробуйте ещё раз" }, { status: 400 });

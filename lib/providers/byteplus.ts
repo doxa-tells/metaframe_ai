@@ -59,6 +59,7 @@ export type ArkStatus = {
   status: "queued" | "in_progress" | "completed" | "failed" | "canceled";
   videoUrl?: string;
   error?: string;
+  tokens?: number; // сколько токенов BytePlus реально списал (usage.completion_tokens)
 };
 
 export async function seedanceStatus(taskId: string): Promise<ArkStatus> {
@@ -69,9 +70,12 @@ export async function seedanceStatus(taskId: string): Promise<ArkStatus> {
   const map: Record<string, ArkStatus["status"]> = {
     queued: "queued", running: "in_progress", succeeded: "completed", failed: "failed", expired: "failed", cancelled: "canceled",
   };
+  const usage = d.usage as { completion_tokens?: number; total_tokens?: number } | undefined;
+  const tokens = Number(usage?.completion_tokens ?? usage?.total_tokens);
   return {
     status: map[s] ?? "in_progress",
     videoUrl: content?.video_url,
+    tokens: Number.isFinite(tokens) && tokens > 0 ? tokens : undefined,
     error: err?.message ? `${err.code ? err.code + ": " : ""}${err.message}` : s === "expired" ? "Задача истекла" : undefined,
   };
 }

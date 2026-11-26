@@ -43,6 +43,13 @@ export type ModeSpec = {
 
 // Длительность загруженного видео-исходника: клиент кладёт её в params, в API она не уходит
 export const SRC_DURATION = "__src_duration";
+// Сумма длительностей видео-референсов (Seedance у BytePlus): провайдер берёт деньги и за секунды входного видео.
+// Для пользователей её заново определяет сервер; в API не уходит
+export const REF_VIDEO_SEC = "__ref_video_sec";
+export const refVideoSeconds = (p: Record<string, unknown> | undefined): number => {
+  const d = Number(p?.[REF_VIDEO_SEC]);
+  return Number.isFinite(d) && d > 0 ? Math.min(600, d) : 0;
+};
 
 export type ModelSpec = {
   id: string;
@@ -203,10 +210,19 @@ function seedream(id: string, name: string, description: string, sizes: string[]
 }
 const seedreamLite = seedream("seedream-5.0-lite", "Seedream 5.0 Lite", "Быстро и дёшево, до 4K, хороший текст на картинках",
   ["2K", "3K", "4K"], "2K", 0.035, "BytePlus: $0.035 за изображение");
-const seedreamPro = seedream("seedream-5.0-pro", "Seedream 5.0 Pro", "Максимум точности: портреты, сложные правки",
-  ["1K", "1.5K", "2K"], "2K", 0.045, "BytePlus: $0.045 за изображение (+$0.003 за каждый референс после первого). Генерация до ~2 минут", "PRO");
+// Прайс BytePlus для Pro: $0.045 до 2,61 Мп (1K и 1.5K) и $0.09 выше (2K); первый референс бесплатно, каждый следующий $0.003
+const SR_PRO_OUT: Record<string, number> = { "1K": 0.045, "1.5K": 0.045, "2K": 0.09 };
+const seedreamPro: ModelSpec = (() => {
+  const m = seedream("seedream-5.0-pro", "Seedream 5.0 Pro", "Максимум точности: портреты, сложные правки",
+    ["1K", "1.5K", "2K"], "2K", SR_PRO_OUT["2K"], "BytePlus: $0.045 за изображение 1K–1.5K, $0.09 за 2K (+$0.003 за каждый референс после первого). Генерация до ~2 минут", "PRO");
+  m.price = (_m, p, inputs) => {
+    const refs = Math.min(10, (inputs?.refs ?? []).filter(Boolean).length);
+    return ((SR_PRO_OUT[String(p.size ?? "2K")] ?? SR_PRO_OUT["2K"]) + 0.003 * Math.max(0, refs - 1)) * Number(p.count ?? 1);
+  };
+  return m;
+})();
 const seedreamFlash = seedream("seedream-5.0-flash", "Seedream 5.0 Flash", "Самый быстрый Seedream",
-  ["1K", "1.5K", "2K"], "2K", 0.02, "BytePlus: около $0.02 за изображение — точную цену смотрите в консоли");
+  ["1K", "1.5K", "2K"], "2K", 0.018, "BytePlus: $0.018 за изображение");
 
 // ---------- Seedream 5.5 ----------
 // Цена BytePlus: $0.02 за картинку до 2,61 Мп (это 1K и 1.5K), 2K дороже; за каждый референс — ещё $0.008.
@@ -232,8 +248,27 @@ const SD_DUR = { key: "duration", label: "Длительность", type: "slid
 const SD_AR: ParamSpec = { key: "aspect_ratio", label: "Формат", type: "select", default: "16:9",
   options: [...opts("16:9", "9:16", "1:1", "4:3", "3:4", "21:9"), { value: "adaptive", label: "Авто" }] };
 const SD_AUDIO = { key: "generate_audio", label: "Звук", type: "toggle", default: true } as const;
-// Официальный прайс BytePlus, $/сек (без видео на входе)
-const SD_PRICE: Record<string, number> = { "480p": 0.103, "720p": 0.231, "1080p": 0.569 };
+// Официальный прайс BytePlus: цена = токены × тариф за млн токенов; токены = секунды × ширина × высота × 24 / 1024.
+// С видео на входе тариф за токен ниже, но в секунды входят и секунды видео-референсов: 25 с референса + 25 с результата
+// в 1080p стоят $17, а не $14. Меньше, чем без видео, не считаем (у BytePlus для таких запросов есть минимум токенов)
+const SD_TOK: Record<string, number> = { "480p": 9626, "720p": 21600, "1080p": 48960 }; // токенов в секунду
+const SD_RATE: Record<string, number> = { "480p": 10.7, "720p": 10.7, "1080p": 11.7 };
+const SD_RATE_VIDEO: Record<string, number> = { "480p": 6.4, "720p": 6.4, "1080p": 7.0 };
+const SDF_RATE = 7.0, SDF_RATE_VIDEO = 4.3; // Flash
+// Фактическая стоимость по числу токенов из ответа BytePlus — в историю задачи пишем её, а не оценку
+export function arkVideoActualUsd(modelId: string, params: Record<string, unknown>, hasVideoInput: boolean, tokens: number): number | null {
+  const res = String(params.resolution ?? "720p");
+  const rate = modelId === "seedance-2.5-flash" ? (hasVideoInput ? SDF_RATE_VIDEO : SDF_RATE)
+    : modelId === "seedance-2.5" ? (hasVideoInput ? SD_RATE_VIDEO : SD_RATE)[res] : undefined;
+  return rate && tokens > 0 ? Math.round(((tokens * rate) / 1e6) * 10000) / 10000 : null;
+}
+function arkVideoUsd(p: Record<string, unknown>, rate: number, rateVideo: number): number {
+  const tok = SD_TOK[String(p.resolution)] ?? SD_TOK["720p"];
+  const out = Number(p.duration ?? 5);
+  const plain = (tok * out * rate) / 1e6;
+  const vin = refVideoSeconds(p);
+  return vin ? Math.max(plain, (tok * (vin + out) * rateVideo) / 1e6) : plain;
+}
 
 const seedance: ModelSpec = {
   id: "seedance-2.5",
@@ -243,8 +278,8 @@ const seedance: ModelSpec = {
   provider: "byteplus",
   description: "До 30 секунд, звук, до 50 референсов",
   badge: "TOP",
-  priceNote: "BytePlus: $0.103/с 480p, $0.231/с 720p, $0.569/с 1080p",
-  price: (_m, p) => (SD_PRICE[String(p.resolution)] ?? 0.231) * Number(p.duration ?? 5),
+  priceNote: "BytePlus: $0.103/с 480p, $0.231/с 720p, $0.573/с 1080p. С видео-референсами оплачиваются и их секунды: $0.062 / $0.138 / $0.343 за секунду референса и результата",
+  price: (_m, p) => arkVideoUsd(p, SD_RATE[String(p.resolution)] ?? 10.7, SD_RATE_VIDEO[String(p.resolution)] ?? 6.4),
   modes: [
     {
       id: "reference", label: "Промпт и референсы", promptRequired: false, textFallback: "text",
@@ -274,8 +309,7 @@ const seedance: ModelSpec = {
 // Та же линейка, быстрая модель: по данным BytePlus вдвое быстрее, 480p и 720p, до 10 изображений, 5 видео и 5 аудио.
 // У неё свой лимит одновременных задач в ModelArk, поэтому и своя полоса очереди (lib/jobs: laneOf)
 const SDF_RES = { key: "resolution", label: "Разрешение", type: "select", default: "720p", options: opts("480p", "720p") } as const;
-// Прайс BytePlus: $7 за млн токенов без видео на входе (у основной модели $10.7) — цена за секунду в той же пропорции
-const SDF_PRICE: Record<string, number> = { "480p": 0.0674, "720p": 0.1511 };
+// Прайс BytePlus: $7 за млн токенов без видео на входе и $4.3 с видео (у основной модели $10.7 и $6.4)
 const SDF_MAX: Record<string, number> = { image_urls: 10, video_urls: 5, audio_urls: 5 };
 
 const seedanceFlash: ModelSpec = {
@@ -284,8 +318,8 @@ const seedanceFlash: ModelSpec = {
   name: "Seedance 2.5 Flash",
   description: "Вдвое быстрее и дешевле: до 30 секунд, звук, до 20 референсов",
   badge: "NEW",
-  priceNote: "BytePlus: $0.067/с 480p, $0.151/с 720p",
-  price: (_m, p) => (SDF_PRICE[String(p.resolution)] ?? SDF_PRICE["720p"]) * Number(p.duration ?? 5),
+  priceNote: "BytePlus: $0.067/с 480p, $0.151/с 720p. С видео-референсами оплачиваются и их секунды: $0.041 / $0.093 за секунду референса и результата",
+  price: (_m, p) => arkVideoUsd(p, SDF_RATE, SDF_RATE_VIDEO),
   modes: seedance.modes.map((m) => ({
     ...m,
     inputs: m.inputs.map((i) => (SDF_MAX[i.key] ? { ...i, max: SDF_MAX[i.key] } : i)),
@@ -708,6 +742,9 @@ export function normalizeRequest(raw: GenRequest): { ok: true; req: GenRequest }
     const clean = list.filter(Boolean);
     if (clean.length) inputs[inp.key] = clean;
   }
+  // Секунды видео-референсов имеют смысл только вместе с самими референсами
+  const rv = src[REF_VIDEO_SEC];
+  if ((inputs.video_urls ?? []).length && typeof rv === "number" && Number.isFinite(rv) && rv > 0) params[REF_VIDEO_SEC] = Math.min(600, rv);
   return { ok: true, req: { modelId: model.id, modeId: mode.id, prompt, params, inputs } };
 }
 

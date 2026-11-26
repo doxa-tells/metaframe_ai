@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { InputSpec, ModeSpec, ModelSpec, ParamSpec } from "@/lib/models";
-import { formatUsd, SRC_DURATION } from "@/lib/models";
+import { formatUsd, REF_VIDEO_SEC, SRC_DURATION } from "@/lib/models";
 import { listPresetsApi, precheckApi, type Preset } from "@/lib/client";
 import { useApp } from "./AppContext";
 import { Icon } from "./Icon";
@@ -133,6 +133,34 @@ export function VideoPanel(p: Props) {
     return () => { v.removeEventListener("loadedmetadata", done); v.removeAttribute("src"); v.load(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [srcUrl, p.mode.source]);
+
+  // Seedance (BytePlus) берёт деньги и за секунды видео-референсов: считаем их сумму, чтобы цена на кнопке была настоящей.
+  // Сервер при запуске пересчитывает её сам
+  const refVideoUrls = needsPrecheck ? (p.inputs.video_urls ?? []).filter(Boolean) : [];
+  const refVideoSig = refVideoUrls.join("|");
+  const refVideoSec = Number(p.params[REF_VIDEO_SEC]) || 0;
+  useEffect(() => {
+    if (!needsPrecheck) return;
+    if (!refVideoUrls.length) { if (refVideoSec) onParamRef.current(REF_VIDEO_SEC, null); return; }
+    let off = false;
+    const els = refVideoUrls.map((u) => new Promise<number>((resolve) => {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.muted = true;
+      // Длину не узнали — считаем по пределу одного референса, как сервер
+      const fin = (n: number) => { resolve(n); v.removeAttribute("src"); v.load(); };
+      v.addEventListener("loadedmetadata", () => fin(Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 30), { once: true });
+      v.addEventListener("error", () => fin(30), { once: true });
+      v.src = u;
+    }));
+    Promise.all(els).then((list) => {
+      if (off) return;
+      const sum = Math.ceil(list.reduce((a, x) => a + x, 0) * 10) / 10;
+      if (sum !== refVideoSec) onParamRef.current(REF_VIDEO_SEC, sum);
+    });
+    return () => { off = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refVideoSig, needsPrecheck, p.model.id, p.mode.id]);
 
   // Каталог стилей (Genjutsu Restyle)
   const presetSpec = p.mode.params.find((x) => x.type === "preset");
@@ -408,6 +436,9 @@ export function VideoPanel(p: Props) {
 
       <div className="vfoot">
         {(message || p.mode.hint) && <div className={`small ${message ? "err" : "muted"}`}>{message ?? p.mode.hint}</div>}
+        {!message && refVideoSec > 0 && (
+          <div className="small muted">Видео-референсы оплачиваются: BytePlus считает и их секунды ({Math.round(refVideoSec)} с) вместе с результатом — цена на кнопке уже с ними.</div>
+        )}
         <button className={`vgen ${nudge ? "nudge" : ""}`} onClick={tryGenerate} title={p.validation ?? p.missingKey ?? "Ctrl/Cmd + Enter"}>
           Сгенерировать
         </button>

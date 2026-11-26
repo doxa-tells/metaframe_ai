@@ -1,7 +1,7 @@
 import "server-only";
 import { randomUUID } from "crypto";
 import {
-  GenRequest, Kind, ProviderId, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, estimateCost, getModel, getMode, validateRequest, normalizeRequest, resolveRequest, buildOmniPlan, ARK_MODEL_IDS,
+  GenRequest, Kind, ProviderId, buildHiggsfieldBody, buildArkImageBody, buildArkVideoBody, arkVideoActualUsd, estimateCost, getModel, getMode, validateRequest, normalizeRequest, resolveRequest, buildOmniPlan, ARK_MODEL_IDS,
 } from "./models";
 import { describeNetError } from "./net";
 import { putFile, putJSON, putPrivateJSON, readPrivateJSON, listItems, readJSON, deleteItems, readLocalFile, toAbsolute, localKeyOf, isOwnMediaUrl, OWN_MEDIA_ERROR, StoredItem } from "./storage";
@@ -724,7 +724,14 @@ export async function pollJob(id: string, providerRequestId: string): Promise<Pa
     const outs: JobOutput[] = as.videoUrl ? [{ url: as.videoUrl, type: "video" }] : [];
     const st2: JobStatus = as.status === "completed" && !outs.length ? "failed" : as.status;
     const err2 = st2 === "completed" ? undefined : as.error || (st2 === "canceled" ? "Отменено" : "Генерация не удалась");
-    const done = await finalize(id, { status: st2, outputs: outs, error: err2 });
+    // Сколько BytePlus списал на самом деле: по токенам из ответа, а не по нашей оценке
+    let real: number | null = null;
+    if (st2 === "completed" && as.tokens) {
+      const f = await findJobFiles(id).catch(() => null);
+      const rec = f?.pending ? await readJSON<JobRecord>(f.pending).catch(() => null) : null;
+      if (rec) real = arkVideoActualUsd(rec.modelId, rec.params ?? {}, (rec.inputs?.video_urls ?? []).some(Boolean), as.tokens);
+    }
+    const done = await finalize(id, { status: st2, outputs: outs, error: err2, ...(real ? { cost: real } : {}) });
     return done ?? { id, status: st2, outputs: outs, error: err2 };
   }
   let st: hf.HfStatus;
