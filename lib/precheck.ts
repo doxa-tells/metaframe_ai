@@ -145,7 +145,8 @@ export async function precheckSeedance(modelId: string, url: string, kind: "imag
 
   if (throttledUntil > Date.now()) return { ok: false, retryAfter: Math.ceil((throttledUntil - Date.now()) / 1000) + 2, at: Date.now() };
   if (scope && (await overQuota(`precheck:${scope}`, LIMITS.precheckPerHour(), 3_600_000))) {
-    return { ok: true, at: Date.now(), skipped: true, skipReason: "Слишком много проверок рефов за час — Seedance проверит реф сам при генерации" };
+    // Не пропускаем проверку молча: реф ждёт своей очереди, интерфейс показывает причину и повторяет сам
+    return { ok: false, retryAfter: 60, reason: "Слишком много проверок референсов за час — проверка продолжится автоматически, запуск откроется после неё", at: Date.now() };
   }
   if (await overQuota("ark:create-asset", createQpm(), 60_000)) return { ok: false, retryAfter: waitSec(), at: Date.now() };
 

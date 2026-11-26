@@ -40,7 +40,7 @@ export const LIMITS = {
   soulPerDay: () => envNum("USER_SOUL_DAILY", 2),
   soulTotal: () => envNum("USER_SOUL_TOTAL", 10),
   uploadsPerDay: () => envNum("USER_UPLOADS_DAILY", 300),
-  precheckPerHour: () => envNum("USER_PRECHECK_HOURLY", 40),
+  precheckPerHour: () => envNum("USER_PRECHECK_HOURLY", 120),
 };
 
 export const quotaError = (message: string) => Object.assign(new Error(message), { status: 429 });

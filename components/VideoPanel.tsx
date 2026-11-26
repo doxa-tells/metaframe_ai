@@ -73,7 +73,8 @@ export function VideoPanel(p: Props) {
       precheckApi(p.model.id, it.url, it.kind).then((r) => {
         // Проверку не пропускаем: запуск открывается только с настоящим вердиктом BytePlus.
         // Если она затянулась, честно говорим почему — новые референсы BytePlus принимает по три в минуту, очередь общая
-        if (r.retryAfter && Date.now() - checkStart.current[it.url] > CHECK_SLOW_MS) {
+        if (r.retryAfter && r.reason) setCheckInfo(r.reason);
+        else if (r.retryAfter && Date.now() - checkStart.current[it.url] > CHECK_SLOW_MS) {
           setCheckInfo("Проверка идёт дольше обычного: BytePlus принимает три новых референса в минуту, очередь общая. Запуск откроется, как только придёт ответ");
         }
         if (r.retryAfter) {
@@ -91,9 +92,9 @@ export function VideoPanel(p: Props) {
         if (cur.includes(it.url)) onInputRef.current(it.key, cur.filter((u) => u !== it.url));
         setRejected(`Референс убран. ${r.reason ?? "BytePlus не пропустил его для Seedance"}`);
       }).catch((e: Error) => {
-        // Проверка не удалась — не блокируем (Seedance проверит сам при генерации), но показываем причину
-        setChecks((c) => ({ ...c, [it.url]: "skip" }));
-        setCheckInfo(`Проверка BytePlus не сработала: ${e.message}`);
+        // Сбой проверки — не повод открывать запуск: индикатор остаётся, причина видна, через 15 с пробуем снова
+        setCheckInfo(`Проверка референса пока не прошла (${e.message}) — повторяю автоматически, запуск откроется после ответа BytePlus`);
+        setTimeout(() => { setChecks((c) => { const n = { ...c }; delete n[it.url]; return n; }); setRetryTick((x) => x + 1); }, 15_000);
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -102,6 +103,7 @@ export function VideoPanel(p: Props) {
   const badge = (url: string) => !needsPrecheck ? null
     : checks[url] === "checking" ? <span className="pc-badge checking" title="Проверяю, пропустит ли Seedance"><span className="spinner" /></span>
     : checks[url] === "ok" ? <span className="pc-badge ok" title="Проверено BytePlus: Seedance примет этот референс"><Icon name="check" size={10} /></span>
+    : checks[url] === "skip" ? <span className="pc-badge skip" title="Заранее не проверен: Seedance проверит этот референс при запуске"><Icon name="info" size={10} /></span>
     : null;
   const { valueOf } = up;
   const taRef = useRef<HTMLTextAreaElement>(null);
