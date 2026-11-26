@@ -766,6 +766,27 @@ input:focus, select:focus, textarea:focus { border-color: #2b4c5b; }
 .lib-empty { grid-column: 1 / -1; display: grid; place-items: center; padding: 30px 10px; text-align: center; font-size: 13px; }
 .lib-foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
 .lib-foot > span { flex: 1; }
+/* Окно «Промпты»: свои сохранённые промпты аккаунта */
+.pr { width: min(720px, 100%); }
+.pr-count { flex: 1; }
+.pr-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.pr-list { flex: 1; overflow-y: auto; padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.pr-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.pr-item:hover { border-color: var(--line2); }
+.pr-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; text-align: left; background: none; border: none; padding: 0; color: var(--text); cursor: pointer; font: inherit; }
+.pr-body b { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-body span { font-size: 12.5px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.pr-tools { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.pr-danger { color: #ff8a8a; border-color: rgba(255,138,138,.4); }
+.pr-form { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px; }
+.pr-form textarea { flex: 1; min-height: 180px; resize: none; font-size: 13.5px; }
+.pr-form-foot { display: flex; align-items: center; gap: 8px; }
+.pr-form-foot > span { flex: 1; }
+.pr-err { padding: 0 14px 12px; }
+@media (max-width: 640px) {
+  .pr-item { flex-direction: column; align-items: stretch; }
+  .pr-tools { justify-content: flex-end; }
+}
 .vslot-lib { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--surface); border: 1px solid var(--line2); color: var(--muted); cursor: pointer; z-index: 2; }
 .vslot-lib:hover { color: var(--accent); border-color: var(--accent); }
 .vdrop-empty-wrap { display: flex; flex-direction: column; align-items: stretch; }

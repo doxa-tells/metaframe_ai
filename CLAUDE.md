@@ -23,6 +23,7 @@ Next.js 16 на Vercel (проект `metaframe-ai`, команда doxa-tells, 
 - `lib/usage.ts` — счётчики лимитов; `lib/precheck.ts` — проверка рефов Seedance через ассеты BytePlus.
 - `lib/errors.ts` — понятные пользователю тексты ошибок; `lib/models.ts` — каталог моделей.
 - `components/Studio.tsx` — главный экран; `components/AdminPanel.tsx` — админка.
+- `components/PromptsButton.tsx`, `lib/prompts.ts`, `app/api/prompts` — кнопка «Промпты» в генерации: свои сохранённые промпты аккаунта (`u/<uid>/prompts.json`).
 - `proxy.ts` — вход обязателен везде, кроме списка `PUBLIC` и исключений в `matcher`.
 - `lib/session.ts` — сессии и подписанные токены; `lib/authflow.ts`, `lib/mail.ts`, `lib/captcha.ts` — Google, письма, капча; роуты в `app/api/auth/`.
 - `lib/plans.ts` — лимиты по пакету (одновременные генерации, кредиты в сутки, частота).

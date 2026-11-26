@@ -9,6 +9,7 @@ import { OptionList, PillPopover } from "./Popover";
 import { MediaThumb } from "./MediaInput";
 import { useRefViewer } from "./RefViewer";
 import { useUploader } from "./useUploader";
+import { PromptsButton } from "./PromptsButton";
 import { emblemFor, emblemWhiteFor, heroFor, modeIcon } from "@/lib/brand";
 
 type Props = {
@@ -427,6 +428,7 @@ export function VideoPanel(p: Props) {
               onClick={() => sendToChat({ text: `Улучши промпт для ${p.model.name} (режим «${p.mode.label}»):\n${p.prompt}` })}>
               <Icon name="sparkle" size={14} /> Улучшить
             </button>
+            <PromptsButton prompt={p.prompt} onPrompt={p.onPrompt} />
             <span className="price-tag" title="Примерная стоимость генерации">{p.priceText ?? `~${formatUsd(p.cost)}`}</span>
           </div>
         </div>

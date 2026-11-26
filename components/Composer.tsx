@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { InputSpec, ModeSpec, ModelSpec, ParamSpec } from "@/lib/models";
 import { formatUsd } from "@/lib/models";
 import { useApp } from "./AppContext";
+import { PromptsButton } from "./PromptsButton";
 import { Icon } from "./Icon";
 import { OptionList, PillPopover } from "./Popover";
 import { ParamControls } from "./ParamControls";
@@ -250,6 +251,8 @@ export function Composer(p: Props) {
             onClick={() => sendToChat({ text: `Улучши промпт для ${p.model.name}${p.model.modes.length > 1 ? ` (режим «${p.mode.label}»)` : ""}:\n${p.prompt}` })}>
             <Icon name="sparkle" size={15} />
           </button>
+
+          <PromptsButton prompt={p.prompt} onPrompt={p.onPrompt} />
         </div>
 
         <button type="button" className={`gen-btn ${nudge ? "nudge" : ""}`} onClick={tryGenerate}

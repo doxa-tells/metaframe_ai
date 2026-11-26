@@ -161,3 +161,11 @@ export const rememberJobs = (kind: Kind, jobs: Job[], cursor?: string) => jobsCa
 export type PrecheckResult = { ok: boolean; reason?: string; status?: string; skipped?: boolean; skipReason?: string; retryAfter?: number };
 export const precheckApi = (modelId: string, url: string, kind: "image" | "video") =>
   api<PrecheckResult>("/api/precheck", { method: "POST", body: JSON.stringify({ modelId, url, kind }) });
+
+// Сохранённые промпты аккаунта
+export type SavedPrompt = { id: string; title: string; text: string; at: number };
+export const listPromptsApi = () => api<{ items: SavedPrompt[] }>("/api/prompts").then((r) => r.items);
+export const savePromptApi = (p: { id?: string; title: string; text: string }) =>
+  api<{ items: SavedPrompt[] }>("/api/prompts", { method: "POST", body: JSON.stringify(p) }).then((r) => r.items);
+export const deletePromptApi = (id: string) =>
+  api<{ items: SavedPrompt[] }>("/api/prompts", { method: "DELETE", body: JSON.stringify({ id }) }).then((r) => r.items);
