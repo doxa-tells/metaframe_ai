@@ -7,6 +7,8 @@ const PUBLIC = new Set([
   "/login", "/api/login", "/api/register", "/terms",
   "/api/auth/google", "/api/auth/google/callback", "/api/auth/verify", "/api/auth/reset", "/reset",
   "/api/cron/sweep",
+  // Гайды: открыты без входа; вторую половину статьи страница отдаёт только вошедшим (см. app/guides)
+  "/guides", "/guides/blender",
 ]);
 
 // Всё приложение закрыто входом (владелец — APP_PASSWORD, пользователи — почта и пароль или Google), кроме списка выше.
