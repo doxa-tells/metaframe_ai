@@ -766,6 +766,14 @@ input:focus, select:focus, textarea:focus { border-color: #2b4c5b; }
 .lib-empty { grid-column: 1 / -1; display: grid; place-items: center; padding: 30px 10px; text-align: center; font-size: 13px; }
 .lib-foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
 .lib-foot > span { flex: 1; }
+/* Окно сохранения файла на телефоне */
+.save-bg { z-index: 1000; } /* поверх просмотрщика (300) */
+.save-sheet { width: min(380px, 100%); display: flex; flex-direction: column; gap: 10px; padding: 18px; background: var(--pop); border: 1px solid var(--line2); border-radius: 18px; }
+.save-sheet b { font-size: 16px; }
+.save-sheet p { margin: 0; line-height: 1.45; }
+.save-sheet .btn { text-decoration: none; }
+.save-sheet .btn.wide { width: 100%; }
+.save-preview { width: 100%; max-height: 46vh; object-fit: contain; border-radius: 12px; background: #000; -webkit-touch-callout: default; user-select: auto; }
 /* Окно «Промпты»: свои сохранённые промпты аккаунта */
 .pr { width: min(720px, 100%); }
 .pr-count { flex: 1; }

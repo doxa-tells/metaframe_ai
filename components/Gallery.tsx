@@ -625,6 +625,8 @@ export function Gallery(p: Props) {
                   ))}
                 </div>
                 <div className="col gap8">
+                  {/* Скачивание — первой кнопкой: на телефоне список действий длинный, и её не было видно без прокрутки */}
+                  <button className="btn accent" disabled={Boolean(busy)} onClick={() => saveOne(open.job, open.index, curUrl)}><Icon name="download" size={14} /> {busy ?? "Скачать"}</button>
                   <button className={`btn ${fav.has(favKey(open.job.id, open.index)) ? "fav-btn on" : "fav-btn"}`} onClick={() => toggleFav(open)} title="Клавиша F">
                     <Icon name="star" size={14} className={fav.has(favKey(open.job.id, open.index)) ? "fav-on" : ""} />
                     {fav.has(favKey(open.job.id, open.index)) ? " В избранном" : " В избранное"}
@@ -639,7 +641,6 @@ export function Gallery(p: Props) {
                   {curIsImage && (
                     <button className="btn" onClick={() => { sendToChat({ images: [curUrl], text: "Разбери этот кадр и предложи промпт для похожего" }); setOpen(null); }}><Icon name="chat" size={14} /> Обсудить в чате</button>
                   )}
-                  <button className="btn" onClick={() => saveOne(open.job, open.index, curUrl)}><Icon name="download" size={14} /> Скачать оригинал</button>
                 </div>
               </div>
             </div>
